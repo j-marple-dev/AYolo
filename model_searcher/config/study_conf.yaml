@@ -1,0 +1,14 @@
+direction: minimize
+study_attr:
+  baseline_path: j-marple/ayolo_coco_train/1ni5msen # Use wandb path if necessary.
+  target_param: 4000000
+  target_mAP: 0.5
+  mAP_weight: 4.0
+  no_prune_epoch: 20
+  optimize:
+    opt: True
+    hyp: False
+    augment: False
+    model: True
+
+hyp_config: model_searcher/config/hyp_config.yaml

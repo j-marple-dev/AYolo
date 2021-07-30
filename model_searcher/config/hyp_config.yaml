@@ -1,0 +1,137 @@
+param:
+  lr0:
+    default: 0.01
+    suggest:
+      range: [0.005, 0.05]  # [min, max]
+      n_step: 5  # Number of splits between [min, max]
+  lrf:
+    default: 0.2
+    suggest:
+      range: [0.1, 0.3]
+      n_step: 5
+  momentum:
+    default: 0.937
+    suggest:
+      range: []
+      n_step: 5
+  weight_decay:
+    default: 0.0005
+    suggest:
+      range: []
+      n_step: 5
+  warmup_epochs:
+    default: 3.0
+    suggest:
+      range: []
+      n_step: 5
+  warmup_momentum:
+    default: 0.8
+    suggest:
+      range: []
+      n_step: 5
+  warmup_bias_lr:
+    default: 0.1
+    suggest:
+      range: [0.05, 0.2]
+      n_step: 5
+  box:
+    default: 0.05
+    suggest:
+      range: [0.03, 0.07]
+      n_step: 5
+  cls:
+    default: 0.5
+    suggest:
+      range: [0.3, 0.7]
+      n_step: 5
+  cls_pw:
+    default: 1.0
+    suggest:
+      range: [0.5, 1.0]
+      n_step: 5
+  obj:
+    default: 1.0
+    suggest:
+      range: [0.5, 1.5]
+      n_step: 6
+  obj_pw:
+    default: 1.0
+    suggest:
+      range: [0.5, 1.5]
+      n_step: 6
+  iou_t:
+    default: 0.20
+    suggest:
+      range: [0.1, 0.3]
+      n_step: 5
+  anchor_t:
+    default: 4.0
+    suggest:
+      range: [2.0, 4.0]
+      n_step: 5
+  fl_gamma:
+    default: 0.0
+    suggest:
+      range: [0, 4.0]
+      n_step: 5
+augment:
+  hsv_h:
+    default: 0.015
+    suggest:
+      range: [0.0, 0.3]
+      n_step: 5
+  hsv_s:
+    default: 0.7
+    suggest:
+      range: [0.5, 0.9]
+      n_step: 5
+  hsv_v:
+    default: 0.4
+    suggest:
+      range: [0.2, 0.6]
+      n_step: 5
+  degrees:
+    default: 0.0
+    suggest:
+      range: [0, 45]
+      n_step: 5
+  translate:
+    default: 0.1
+    suggest:
+      range: [0.0, 0.3]
+      n_step: 5
+  scale:
+    default: 0.5
+    suggest:
+      range: [0.0, 0.9]
+      n_step: 5
+  shear:
+    default: 0.0
+    suggest:
+      range: [0.0, 10.0]
+      n_step: 5
+  perspective:
+    default: 0.0
+    suggest:
+      range: [0.0, 0.001]
+      n_step: 5
+  flipud:
+    default: 0.0
+    suggest:
+      range: [0, 0.5]
+      n_step: 5
+  fliplr:
+    default: 0.5
+    suggest:
+      range: [0.0, 0.5]
+      n_step: 5
+  mosaic:
+    default: 1.0
+    suggest:
+      range: [0.0, 1.0]
+      n_step: 5
+  mixup:
+    default: 0.0
+    suggest:
+      range: [0.0, 0.5]
+      n_step: 5
