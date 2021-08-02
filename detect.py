@@ -1,6 +1,10 @@
+"""Run inference with a YOLOv5 model on images, videos, directories, streams.
+
+Usage:
+    $ python path/to/detect.py --source path/to/img.jpg --weights yolov5s.pt --img 640
+"""
 import argparse
 import os
-import platform
 import shutil
 import time
 from pathlib import Path
@@ -18,7 +22,12 @@ from utils.general import (apply_classifier, check_img_size,
 from utils.torch_utils import load_classifier, select_device, time_synchronized
 
 
-def detect(save_img=False):
+def detect(save_img: bool =False) -> None:
+    """Detect images, vides, directories, streams.
+
+    Args:
+        save_img: save result image or not.
+    """
     out, source, weights, view_img, save_txt, imgsz = (
         opt.output,
         opt.source,
