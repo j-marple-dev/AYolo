@@ -366,7 +366,12 @@ def test(
     )
 
 
-def divide_target_by_size(labels: Union[list, np.ndarray], img_size: Union[list, tuple, np.ndarray], device: str, resolution=(1080, 1920)) -> tuple:
+def divide_target_by_size(
+    labels: Union[list, np.ndarray],
+    img_size: Union[list, tuple, np.ndarray],
+    device: str,
+    resolution: Union[list, tuple] = (1080, 1920),
+) -> tuple:
     """Divide target by size."""
     small = []
     medium = []
@@ -398,7 +403,12 @@ def divide_target_by_size(labels: Union[list, np.ndarray], img_size: Union[list,
 
 
 def get_correct_bbox(
-    labels: Union[list, tuple, np.ndarray], pred: torch.Tensor, iouv: torch.Tensor, whwh: torch.Tensor, device: str, best_iou: Optional[np.ndarray] = None
+    labels: Union[list, tuple, np.ndarray],
+    pred: torch.Tensor,
+    iouv: torch.Tensor,
+    whwh: torch.Tensor,
+    device: str,
+    best_iou: Optional[np.ndarray] = None,
 ) -> Tuple[Any]:
     """Get correct bounding box."""
     niou = iouv.numel()
@@ -572,7 +582,7 @@ def get_profile_stats(
     print(data_config)
     nc = 1 if opt.single_cls else data_config["nc"]  # number of classes
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
-    # niou = iouv.numel()
+    niou = iouv.numel()  # noqa: F841
 
     # Load dataloader
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
@@ -834,7 +844,11 @@ if __name__ == "__main__":
                 wdb_img_title += "BBox w/ labels `Confidence:IoU` (percentage value)"
             for i in range((len(wdb_imgs) + n_plots - 1) // n_plots):
                 wandb.log(
-                    {wdb_img_title: wdb_imgs[n_plots * i: n_plots * (i + 1)]},
+                    {
+                        wdb_img_title: wdb_imgs[
+                            n_plots * i : n_plots * (i + 1)  # noqa: E203
+                        ]
+                    },
                     commit=True,
                 )  # commit=True for large figure
 

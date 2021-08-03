@@ -39,7 +39,14 @@ from utils.wandb_utils import load_model_from_wandb, wlog_weight
 logger = logging.getLogger(__name__)
 
 
-def train(hyp: dict, opt: argparse.Namespace, device: torch.device, tb_writer: SummaryWriter = None, wlog: bool = False, test_every_epoch: int = 10) -> tuple:
+def train(
+    hyp: dict,
+    opt: argparse.Namespace,
+    device: torch.device,
+    tb_writer: SummaryWriter = None,
+    wlog: bool = False,
+    test_every_epoch: int = 10,
+) -> tuple:
     """Train the model."""
     logger.info(f"Hyperparameters {hyp}")
     log_dir = (
