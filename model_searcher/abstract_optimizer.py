@@ -4,6 +4,8 @@
 - Contact: limjk@jmarple.ai
 """
 
+import argparse
+import logging
 import math
 import platform
 import test  # import test.py to get mAP after each epoch
@@ -11,16 +13,29 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from argparse import Namespace
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
+import numpy as np
 import optuna
+import torch
 import torch.utils.data
 from torch.cuda import amp
 from tqdm import tqdm
 
 from model_searcher.optuna_utils import create_load_study_with_config
-from model_searcher.train_functions import *
+from model_searcher.train_functions import (convert_model_by_mode,
+                                            freeze_parameters, get_trainloader,
+                                            init_optimizer, init_scheduler,
+                                            init_train_configuration,
+                                            set_model_parameters,
+                                            strip_optimizer_in_checkpoints,
+                                            train_loop_get_multi_scale_imgs,
+                                            train_loop_save_model,
+                                            train_loop_set_warmup_phase,
+                                            train_loop_update_image_weight,
+                                            train_loop_update_pbar_loss_result)
 from models.yolo import Model
+from utils.datasets import create_dataloader
 from utils.general import (check_anchors, check_img_size, compute_loss,
                            fitness, increment_dir, set_logging_detail)
 from utils.torch_utils import select_device
@@ -30,7 +45,14 @@ from utils.wandb_utils import load_model_from_wandb
 class AbstractOptimizer(ABC):
     """Abstract Optuna Optimizer for object detection model."""
 
-    def __init__(self, n_trials: int = 300, test_step: int = 1, prune=True, n_skip=0):
+    def __init__(
+        self,
+        n_trials: int = 300,
+        test_step: int = 1,
+        prune: bool = True,
+        n_skip: int = 0,
+    ) -> None:
+        """Initialize AbstractOptimizer class."""
         self.logger = logging.getLogger(self.__class__.__name__)
         set_logging_detail(0)
         self.test_step = test_step
@@ -38,7 +60,14 @@ class AbstractOptimizer(ABC):
         self.prune = prune
         self.n_skip = n_skip
 
-    def train(self, hyp, opt, device, trial):
+    def train(
+        self,
+        hyp: dict,
+        opt: argparse.Namespace,
+        device: torch.device,
+        trial: optuna.trial,
+    ) -> tuple:
+        """Train model with optuna."""
         self.log(f"Hyperparameters {hyp}")
         (
             log_dir,
@@ -60,7 +89,7 @@ class AbstractOptimizer(ABC):
         # Model (no-pretrained)
         if isinstance(opt.cfg, str):
             model, _ = load_model_from_wandb(opt.cfg, device=device)
-            for k, v in model.named_parameters():
+            for _, v in model.named_parameters():
                 v.requires_grad = True
         else:
             model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
@@ -179,7 +208,7 @@ class AbstractOptimizer(ABC):
             for i, (
                 imgs,
                 targets,
-                paths,
+                _paths,
                 _,
             ) in pbar:  # epoch--batch -------------------------------------------------
                 ni = i + nb * epoch  # number integrated batches (since train start)
@@ -299,19 +328,20 @@ class AbstractOptimizer(ABC):
         # results = (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist())
         return results, test_time_logs, model
 
-    def log(self, msg, level=logging.INFO):
+    def log(self, msg: str, level: int = logging.INFO) -> None:
+        """Log informations."""
         self.logger.log(level, msg)
 
     @abstractmethod
-    def objective(self, trial):
+    def objective(self, trial: optuna.trial) -> Any:  # noqa: D102
         pass
 
     @abstractmethod
-    def get_score(self, *args) -> float:
+    def get_score(self, *args: Any) -> float:  # noqa: D102
         pass
 
     @abstractmethod
-    def raise_trial_pruned(self) -> None:
+    def raise_trial_pruned(self) -> None:  # noqa: D102
         pass
 
     def optimize(
@@ -328,7 +358,8 @@ class AbstractOptimizer(ABC):
         study_conf: Union[str, None] = None,
         overwrite_user_attr: bool = False,
     ) -> Union[optuna.study.Study, None]:
-        """
+        """Run study.
+
         Args:
             study_name: Study Name for optuna. A unique name is generated automatically when this is None.
             storage: Storage Address/Path (postgresql://user:passwd@localhost/dbname, mysql://user:passwd@localhost/dbname, sqlite:///file_path.db, and, ...)
@@ -382,7 +413,7 @@ class AbstractOptimizer(ABC):
                 break
             except KeyboardInterrupt:
                 break
-            except:
+            except Exception:
                 self.log("Something went wrong!")
                 traceback.print_exc()
                 self.log("Re-try :: {} ::".format(n_retry))
@@ -396,24 +427,26 @@ class AbstractOptimizer(ABC):
 
         return study
 
-    def set_worker_attr(self, trial):
-        """Setting user attributes with the computer name by 'worker' attribute.
+    def set_worker_attr(self, trial: optuna.trial) -> None:
+        """Set user attributes with the computer name by 'worker' attribute.
 
         Args:
             trial: (optuna trial)
         Returns:
         """
-
         trial.set_user_attr("worker", platform.node())
 
 
 if __name__ == "__main__":
 
     class TestABCOptimizer(AbstractOptimizer):
-        def __init__(self):
+        """Test class."""
+
+        def __init__(self) -> None:
+            """Initialize test class."""
             super(TestABCOptimizer, self).__init__()
 
-        def objective(self, trial):
+        def objective(self, trial: optuna.trial) -> None:  # noqa
             return None
 
     abs_opt = TestABCOptimizer()
@@ -441,6 +474,8 @@ if __name__ == "__main__":
         "workers": 8,
     }
 
+    import yaml
+
     with open(tmp_opt["cfg"], "r") as f:
         cfg = yaml.load(f, yaml.FullLoader)
     with open(tmp_opt["hyp"], "r") as f:
@@ -448,10 +483,16 @@ if __name__ == "__main__":
 
     tmp_opt = Namespace(**tmp_opt)
     tmp_opt.total_batch_size = tmp_opt.batch_size
+
+    import os
+
     tmp_opt.world_size = (
         int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     )
     tmp_opt.global_rank = int(os.environ["RANK"]) if "RANK" in os.environ else -1
+
+    from pathlib import Path
+
     tmp_opt.logdir = increment_dir(
         Path(tmp_opt.logdir) / "exp", tmp_opt.name
     )  # runs/exp1
