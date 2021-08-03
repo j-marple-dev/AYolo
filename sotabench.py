@@ -1,9 +1,10 @@
+"""Benchmark of State-of-the-art methods."""
 import argparse
 import glob
-import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -14,10 +15,9 @@ from tqdm import tqdm
 
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
-from utils.general import (ap_per_class, box_iou, check_dataset, check_file,
-                           check_img_size, clip_coords, coco80_to_coco91_class,
-                           compute_loss, non_max_suppression, output_to_target,
-                           plot_images, scale_coords, set_logging, xywh2xyxy,
+from utils.general import (check_dataset, check_file, check_img_size,
+                           clip_coords, coco80_to_coco91_class, compute_loss,
+                           non_max_suppression, scale_coords, set_logging,
                            xyxy2xywh)
 from utils.torch_utils import select_device, time_synchronized
 
@@ -25,22 +25,23 @@ DATA_ROOT = "./.data/vision/coco" if is_server() else "../coco"  # sotabench dat
 
 
 def test(
-    data,
-    weights=None,
-    batch_size=16,
-    imgsz=640,
-    conf_thres=0.001,
-    iou_thres=0.6,  # for NMS
-    save_json=False,
-    single_cls=False,
-    augment=False,
-    verbose=False,
-    model=None,
-    dataloader=None,
-    save_dir="",
-    merge=False,
-    save_txt=False,
-):
+    data: str,
+    weights: str,
+    batch_size: int = 16,
+    imgsz: int = 640,
+    conf_thres: float = 0.001,
+    iou_thres: float = 0.6,  # for NMS
+    save_json: bool = False,
+    single_cls: bool = False,
+    augment: bool = False,
+    verbose: bool = False,
+    model: Optional[torch.nn.Module] = None,
+    dataloader: Optional[Any] = None,
+    save_dir: str = "",
+    merge: bool = False,
+    save_txt: bool = False,
+) -> None:
+    """Compare model with other sota models."""
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
@@ -79,6 +80,7 @@ def test(
         data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
     check_dataset(data)  # check
     nc = 1 if single_cls else int(data["nc"])  # number of classes
+    print(f"Number of classes: {nc}")
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
 
@@ -105,7 +107,7 @@ def test(
         )[0]
 
     seen = 0
-    names = model.names if hasattr(model, "names") else model.module.names
+    # names = model.names if hasattr(model, "names") else model.module.names
     coco91class = coco80_to_coco91_class()
     s = ("%20s" + "%12s" * 6) % (
         "Class",
@@ -116,17 +118,27 @@ def test(
         "mAP@.5",
         "mAP@.5:.95",
     )
-    p, r, f1, mp, mr, map50, map, t0, t1 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    p, r, f1, mp, mr, map50, map, t0, t1 = (  # noqa: F841
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
     loss = torch.zeros(3, device=device)
-    jdict, stats, ap, ap_class = [], [], [], []
+    jdict, stats, ap, ap_class = [], [], [], []  # noqa: F841
     evaluator = COCOEvaluator(root=DATA_ROOT, model_name=opt.weights.replace(".pt", ""))
-    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+    for _batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
-        whwh = torch.Tensor([width, height, width, height]).to(device)
+        whwh = torch.Tensor([width, height, width, height]).to(device)  # noqa: F841
 
         # Disable gradients
         with torch.no_grad():
@@ -178,7 +190,7 @@ def test(
                 x[:, :4] = scale_coords(
                     img[si].shape[1:], x[:, :4], shapes[si][0], shapes[si][1]
                 )  # to original
-                for *xyxy, conf, cls in x:
+                for *xyxy, conf, cls in x:  # noqa: B007
                     xywh = (
                         (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
                         .view(-1)

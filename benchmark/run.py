@@ -9,15 +9,17 @@ import progressbar
 import torch
 import yaml
 
-sys.path.append("/usr/src/yolo")  # to run subdirecotires
-from models.experimental import ExternalDetect, attempt_load
+from models.experimental import attempt_load
 from utils.datasets import create_dataloader
 from utils.general import check_img_size, non_max_suppression
 from utils.torch_utils import select_device
 from utils.wandb_utils import read_opt_yaml
 
+sys.path.append("/usr/src/yolo")  # to run subdirecotires
 
-def value_test(torch_model, jit_model, jit_detect, dataloader_config, device):
+
+def value_test(torch_model: str, jit_model: str, jit_detect: str, dataloader_config: dict, device: torch.device) -> None:
+    """Test values of original torch model and jit model."""
     print("[Torch <-> jit] Value test")
 
     # Load torchmodel
@@ -38,7 +40,7 @@ def value_test(torch_model, jit_model, jit_detect, dataloader_config, device):
     dataloader_config["stride"] = t_model.stride.max()
     dataloader = create_dataloader(**dataloader_config)[0]
 
-    for batch_i, (img, targets, paths, shapes) in enumerate(
+    for batch_i, (img, targets, _paths, _shapes) in enumerate(
         progressbar.progressbar(dataloader)
     ):
         if batch_i == 0:
@@ -81,7 +83,8 @@ def value_test(torch_model, jit_model, jit_detect, dataloader_config, device):
         )
 
 
-def torch_test(torch_model, dataloader_config, device):
+def torch_test(torch_model: str, dataloader_config: dict, device: torch.device) -> None:
+    """Test original torch model."""
     print("[PyTorch] Inference Start")
     runtime_start = monotonic()
 
@@ -98,7 +101,7 @@ def torch_test(torch_model, dataloader_config, device):
     dataloader_config["stride"] = model.stride.max()
     dataloader = create_dataloader(**dataloader_config)[0]
 
-    for batch_i, (img, targets, paths, shapes) in enumerate(
+    for batch_i, (img, targets, _paths, _shapes) in enumerate(
         progressbar.progressbar(dataloader)
     ):
         if batch_i == 0:
@@ -110,13 +113,14 @@ def torch_test(torch_model, dataloader_config, device):
 
         # Run model
         inf_out = model(img)[0]
-        output = non_max_suppression(inf_out, 0.1, 0.1)
+        non_max_suppression(inf_out, 0.1, 0.1)
 
     runtime_end = monotonic() - runtime_start
     print(f"[PyTorch]: {runtime_end}s")
 
 
-def torchjit_test(jit_model, jit_detect, dataloader_config, device):
+def torchjit_test(jit_model: str, jit_detect: str, dataloader_config: dict, device: torch.device) -> None:
+    """Test torch-jit model."""
     print("[jit] Inference Start")
     runtime_start = monotonic()
 
@@ -132,7 +136,7 @@ def torchjit_test(jit_model, jit_detect, dataloader_config, device):
     dataloader_config["stride"] = 32
     dataloader = create_dataloader(**dataloader_config)[0]
 
-    for batch_i, (img, targets, paths, shapes) in enumerate(
+    for batch_i, (img, targets, _paths, _shapes) in enumerate(
         progressbar.progressbar(dataloader)
     ):
         # load detect
@@ -157,17 +161,18 @@ def torchjit_test(jit_model, jit_detect, dataloader_config, device):
         # jitoutput = [batch, 3, 60, 60, 6], [batch, 3, 30, 30, 6], [batch, 3, 15, 15, 6]
         out = model(img)
         inf_out = detect(*out)[0]
-        output = non_max_suppression(inf_out, 0.1, 0.1)
+        non_max_suppression(inf_out, 0.1, 0.1)
 
     runtime_end = monotonic() - runtime_start
     print(f"[jit]: {runtime_end}s")
 
 
-def trt_test(trt_model, dataloader):
-    runtime_start = monotonic()
-
-    runtime_end = runtime_start - monotonic()
-    pass
+# TODO: Check the below function is needed
+# def trt_test(trt_model, dataloader):
+#     runtime_start = monotonic()
+#
+#     runtime_end = runtime_start - monotonic()
+#     pass
 
 
 if __name__ == "__main__":
@@ -217,7 +222,10 @@ if __name__ == "__main__":
 
     # Initialize dataloader config
     class opt_dl:
-        def __init__(self):
+        """Dataloader config class."""
+
+        def __init__(self) -> None:
+            """Initialize the class."""
             self.single_cls = True
 
     dataloader_config = {

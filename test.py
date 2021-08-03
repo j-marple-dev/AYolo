@@ -1,11 +1,7 @@
+"""Module for test."""
 import argparse
-import glob
-import json
 import os
-import shutil
 from collections import namedtuple
-from pathlib import Path
-from time import monotonic
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -17,11 +13,8 @@ from tqdm import tqdm
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
 from utils.general import (BBoxScore, ap_per_class, box_iou, check_dataset,
-                           check_file, check_img_size, clip_coords,
-                           coco80_to_coco91_class, compute_loss,
-                           mask_large_box, non_max_suppression,
-                           output_to_target, plot_images, scale_coords,
-                           set_logging, xywh2xyxy, xyxy2xywh)
+                           check_img_size, compute_loss, non_max_suppression,
+                           xywh2xyxy)
 from utils.torch_utils import select_device, time_synchronized
 from utils.wandb_utils import load_model_from_wandb, read_opt_yaml
 
@@ -35,12 +28,16 @@ class TestResult:
         ["p", "r", "ap50", "f1", "mp", "mr", "map50", "map", "stats", "ap", "ap_class"],
     )  # 8 float numbers and 3 lists
     # NOTE: `get_primary_result` works for the following list `sizes`
+
     def __init__(
         self,
         nc: int,
-        sizes: List[str] = ["total", "small", "medium", "large"],
+        sizes: List[str],
         class_names: Optional[List[str]] = None,
-    ):
+    ) -> None:
+        """Initialize TestResult class."""
+        if not sizes:
+            sizes = ["total", "small", "medium", "large"]
         self.sizes = sizes
         for size in self.sizes:
             setattr(
@@ -58,7 +55,8 @@ class TestResult:
         self.nc = nc
         self.names = class_names
 
-    def update_for_all_sizes(self):
+    def update_for_all_sizes(self) -> None:
+        """Update size."""
         for size in self.sizes:
             self.update(size)
 
@@ -93,7 +91,8 @@ class TestResult:
     # TODO: Find a way to remove auxiliary return value `time_stats`
     def print_result(
         self, imgsz: int, batch_size: int, training: bool, verbose: bool = False
-    ):
+    ) -> tuple:
+        """Print results."""
         pf = "%20s" + "%12.3g" * 6  # print format
         for size in self.sizes:
             stats = getattr(self, size)
@@ -114,8 +113,9 @@ class TestResult:
         if verbose and self.nc > 1:
             if self.names is None or len(self.names) != self.nc:
                 self.names = [str(i) for i in range(self.nc)]
-            stats = getattr(self, "total")
-            nt = getattr(self, "nt_total")
+            # TODO: Find a way to lines not use "getattr" method
+            stats = getattr(self, "total")  # noqa: B009
+            nt = getattr(self, "nt_total")  # noqa: B009
             for i, c in enumerate(stats["ap_class"]):
                 print(
                     pf
@@ -196,12 +196,12 @@ def get_primary_result(
     # TODO: Only the `stats` is necessary in this function...Modify here!
 
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
-    niou = iouv.numel()
+    # niou = iouv.numel()
 
     test_result.loss = torch.zeros(3, device=device)
 
     # size wise mAP
-    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+    for _batch_i, (img, targets, paths, _shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -319,8 +319,8 @@ def test(
     verbose: bool = False,
     dataloader: Optional[torch.utils.data.DataLoader] = None,
     plots: bool = False,
-):
-
+) -> tuple:
+    """Test model and save the results."""
     # Initialize/load model and set device
     training = model is not None
     if model is not None:
@@ -329,7 +329,7 @@ def test(
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Configure
-    model.eval()
+    model.to(device).eval()
     with open(data) as f:
         data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
     check_dataset(data)  # check
@@ -366,12 +366,13 @@ def test(
     )
 
 
-def divide_target_by_size(labels, img_size, device, resolution=(1080, 1920)):
+def divide_target_by_size(labels: Union[list, np.ndarray], img_size: Union[list, tuple, np.ndarray], device: str, resolution=(1080, 1920)) -> tuple:
+    """Divide target by size."""
     small = []
     medium = []
     large = []
-    width = img_size[0]
-    height = img_size[1]
+    # width = img_size[0]
+    # height = img_size[1]
     # COCO definition of small, medium, large.
     # small: < 32x32
     # medium: 32x32 ~ 96x96
@@ -397,23 +398,9 @@ def divide_target_by_size(labels, img_size, device, resolution=(1080, 1920)):
 
 
 def get_correct_bbox(
-    labels, pred, iouv, whwh, device, best_iou: Optional[np.ndarray] = None
+    labels: Union[list, tuple, np.ndarray], pred: torch.Tensor, iouv: torch.Tensor, whwh: torch.Tensor, device: str, best_iou: Optional[np.ndarray] = None
 ) -> Tuple[Any]:
-    """
-
-    Args:
-        labels
-        pred
-        iouv
-        whwh
-        device
-
-    Return:
-        correct
-        obj_prob
-        class_prob
-        tcls
-    """
+    """Get correct bounding box."""
     niou = iouv.numel()
     nl = len(labels)
     tcls = labels[:, 0].tolist() if nl else []
@@ -478,8 +465,8 @@ def test_model_from_wandb_run(
     single_cls: bool = False,
     log_dir: str = "runs/test",
     verbose: int = 1,
-):
-
+) -> Tuple[Any]:
+    """Test model from wandb run."""
     n_param = sum([param.numel() for param in model.parameters()])
 
     gs = int(max(model.stride))
@@ -548,7 +535,8 @@ def get_profile_stats(
     test_type: str,
     augment: bool = False,
     bbox_scores: BBoxScore = None,
-):
+) -> Tuple[Any]:
+    """Get profile stats."""
     device = select_device(opt.device, batch_size=opt.batch)
     if opt.wlog and opt.plots:
         assert isinstance(bbox_scores, BBoxScore), "Wrong `bbox_scores`"
@@ -584,7 +572,7 @@ def get_profile_stats(
     print(data_config)
     nc = 1 if opt.single_cls else data_config["nc"]  # number of classes
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
-    niou = iouv.numel()
+    # niou = iouv.numel()
 
     # Load dataloader
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
@@ -604,7 +592,7 @@ def get_profile_stats(
     # Profiling model
     # consider the first batch shape assuming all images have the same size
     height, width = dataset.batch_shapes[0]  # [288, 512] if img_size=480, pad=0.5
-    whwh = torch.Tensor([width, height, width, height]).to(device)
+    whwh = torch.Tensor([width, height, width, height]).to(device)  # noqa: F841
     print(
         f"Run profile, img_size: (h, w) = {(height, width)}, batch_size: {opt.batch}, iter: {opt.profile_iteration}"
     )
@@ -651,6 +639,7 @@ def get_profile_stats(
 
 
 def find_weight_pt(model_dir: str) -> str:
+    """Find the weight pt file."""
     if os.path.isdir(model_dir):
         weight_path = os.path.join(model_dir, "weights", "best.pt")
         if not os.path.isfile(weight_path):
@@ -845,7 +834,7 @@ if __name__ == "__main__":
                 wdb_img_title += "BBox w/ labels `Confidence:IoU` (percentage value)"
             for i in range((len(wdb_imgs) + n_plots - 1) // n_plots):
                 wandb.log(
-                    {wdb_img_title: wdb_imgs[n_plots * i : n_plots * (i + 1)]},
+                    {wdb_img_title: wdb_imgs[n_plots * i: n_plots * (i + 1)]},
                     commit=True,
                 )  # commit=True for large figure
 

@@ -22,7 +22,7 @@ from utils.general import (apply_classifier, check_img_size,
 from utils.torch_utils import load_classifier, select_device, time_synchronized
 
 
-def detect(save_img: bool =False) -> None:
+def detect(save_img: bool = False) -> None:
     """Detect images, vides, directories, streams.
 
     Args:

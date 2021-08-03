@@ -4,11 +4,8 @@
 - Contact: lim.jeikei@gmail.com
 """
 
-import warnings
-
-warnings.warn = lambda *args, **kwargs: None
-
 import argparse
+import warnings
 from pprint import pprint
 from typing import List
 
@@ -18,8 +15,11 @@ from optuna.trial import TrialState
 
 from model_searcher.optuna_utils import create_load_study_with_config
 
+warnings.warn = lambda *args, **kwargs: None  # noqa: E731
 
-def print_study_list(storage: str):
+
+def print_study_list(storage: str) -> None:
+    """Print the optuna study list."""
     studies = optuna.get_all_study_summaries(storage=storage)
 
     print("No | .. Start Date .. | nTry | . Score .| ... Name ... |")
@@ -44,7 +44,8 @@ def print_study_list(storage: str):
         print(msg)
 
 
-def remove_study(storage: str, study_name: str, force: bool = False):
+def remove_study(storage: str, study_name: str, force: bool = False) -> None:
+    """Remove optuna study."""
     print(
         "\x1b[1;103;90m :: Warning :: \x1b[30;41m You are about to DELETE \x1b[7m\x1b[103;90m\x1b[5m\x1b[4m {} \x1b[0m\x1b[1m\x1b[7;30;39m study.\x1b[0m".format(
             study_name
@@ -62,7 +63,8 @@ def remove_study(storage: str, study_name: str, force: bool = False):
         print("{} study has ben deleted.".format(study_name))
 
 
-def query_trial(trial: optuna.trial.FrozenTrial):
+def query_trial(trial: optuna.trial.FrozenTrial) -> None:
+    """Query the optuna trial."""
     print(f"Index: {trial.number}, State: {trial.state}, Value: {trial.value}")
 
     print("-" * 10, "Params", "-" * 10)
@@ -72,12 +74,16 @@ def query_trial(trial: optuna.trial.FrozenTrial):
     pprint(trial.user_attrs)
 
 
-def show_importance(i_study: optuna.Study):
+def show_importance(i_study: optuna.Study) -> None:
+    """Print importance in study."""
     importance = optuna.importance.get_param_importances(i_study)
     pprint(importance)
 
 
-def show_records(trials: List[optuna.trial.FrozenTrial], args: argparse.Namespace):
+def show_records(
+    trials: List[optuna.trial.FrozenTrial], args: argparse.Namespace
+) -> None:
+    """Show the records."""
     states_to_show = [TrialState.COMPLETE]
     if args.show_prune:
         states_to_show += [TrialState.PRUNED]
@@ -109,7 +115,7 @@ def show_records(trials: List[optuna.trial.FrozenTrial], args: argparse.Namespac
     if args.direction == "maximize":
         trials = trials[::-1]
 
-    td2str = lambda x: "{:02d}:{:02d}:{:02d}".format(
+    td2str = lambda x: "{:02d}:{:02d}:{:02d}".format(  # noqa: E731
         int(x / 60 / 60), int(x / 60) % 60, x % 60
     )
     for i, t in enumerate(trials):
@@ -146,11 +152,12 @@ def show_records(trials: List[optuna.trial.FrozenTrial], args: argparse.Namespac
         print(msg)
 
 
-def print_study_info(study: optuna.study.Study, storage: str):
+def print_study_info(study: optuna.study.Study, storage: str) -> None:
+    """Print study informations."""
     print("----- Study Information -----")
     print(f"  - name: {study.study_name}")
     print(f"  - direction: {study.direction}")
-    print(f"  - Attributes")
+    print("  - Attributes")
     print("\n".join([f"    - {k}: {v}" for k, v in study.user_attrs.items()]))
 
     s_summary = [
@@ -161,7 +168,8 @@ def print_study_info(study: optuna.study.Study, storage: str):
     print(f"  - Number of trials: {s_summary.n_trials:,d}")
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace) -> None:
+    """Operate optuna watcher."""
     if args.ls:
         print_study_list(args.storage)
         return

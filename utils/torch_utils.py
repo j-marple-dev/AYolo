@@ -30,7 +30,7 @@ def init_torch_seeds(seed=0):
         cudnn.benchmark = True
 
 
-def select_device(device="", batch_size=None):
+def select_device(device: str="", batch_size=None) -> torch.device:
     """device = 'cpu' or '0' or '0,1,2,3'"""
     cpu_request = device.lower() == "cpu"
     if device and not cpu_request:  # if device requested other than 'cpu'

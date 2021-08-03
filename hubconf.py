@@ -1,24 +1,24 @@
-"""File for accessing YOLOv5 via PyTorch Hub https://pytorch.org/hub/
+"""File for accessing YOLOv5 via PyTorch Hub https://pytorch.org/hub/.
 
 Usage:
     import torch
     model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, channels=3, classes=80)
 """
-
-dependencies = ["torch", "yaml"]
 import os
 
 import torch
 
-from models.common import NMS
+# from models.common import NMS
 from models.yolo import Model
 from utils.google_utils import attempt_download
 
+dependencies = ["torch", "yaml"]
 
-def create(name, pretrained, channels, classes):
-    """Creates a specified YOLOv5 model.
 
-    Arguments:
+def create(name: str, pretrained: bool, channels: int, classes: int) -> torch.nn.Module:
+    """Create a specified YOLOv5 model.
+
+    Args:
         name (str): name of model, i.e. 'yolov5s'
         pretrained (bool): load pretrained weights into the model
         channels (int): number of input channels
@@ -60,7 +60,9 @@ def create(name, pretrained, channels, classes):
         raise Exception(s) from e
 
 
-def yolov5s(pretrained=False, channels=3, classes=80):
+def yolov5s(
+    pretrained: bool = False, channels: int = 3, classes: int = 80
+) -> torch.nn.Module:
     """YOLOv5-small model from https://github.com/ultralytics/yolov5.
 
     Arguments:
@@ -74,7 +76,9 @@ def yolov5s(pretrained=False, channels=3, classes=80):
     return create("yolov5s", pretrained, channels, classes)
 
 
-def yolov5m(pretrained=False, channels=3, classes=80):
+def yolov5m(
+    pretrained: bool = False, channels: int = 3, classes: int = 80
+) -> torch.nn.Module:
     """YOLOv5-medium model from https://github.com/ultralytics/yolov5.
 
     Arguments:
@@ -88,7 +92,9 @@ def yolov5m(pretrained=False, channels=3, classes=80):
     return create("yolov5m", pretrained, channels, classes)
 
 
-def yolov5l(pretrained=False, channels=3, classes=80):
+def yolov5l(
+    pretrained: bool = False, channels: int = 3, classes: int = 80
+) -> torch.nn.Module:
     """YOLOv5-large model from https://github.com/ultralytics/yolov5.
 
     Arguments:
@@ -102,7 +108,9 @@ def yolov5l(pretrained=False, channels=3, classes=80):
     return create("yolov5l", pretrained, channels, classes)
 
 
-def yolov5x(pretrained=False, channels=3, classes=80):
+def yolov5x(
+    pretrained: bool = False, channels: int = 3, classes: int = 80
+) -> torch.nn.Module:
     """YOLOv5-xlarge model from https://github.com/ultralytics/yolov5.
 
     Arguments:

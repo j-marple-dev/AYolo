@@ -1,3 +1,4 @@
+"""Module for training."""
 import argparse
 import logging
 import math
@@ -26,19 +27,20 @@ from models.yolo import Model
 from utils.datasets import create_dataloader
 from utils.general import (check_anchors, check_dataset, check_file,
                            check_git_status, check_img_size, compute_loss,
-                           fitness, get_latest_run, increment_dir, init_seeds,
+                           fitness, get_latest_run, init_seeds,
                            labels_to_class_weights, labels_to_image_weights,
                            plot_evolution, plot_images, plot_labels,
                            plot_results, print_mutation, set_logging,
                            strip_optimizer, torch_distributed_zero_first)
-from utils.google_utils import attempt_download
+# from utils.google_utils import attempt_download
 from utils.torch_utils import ModelEMA, intersect_dicts, select_device
 from utils.wandb_utils import load_model_from_wandb, wlog_weight
 
 logger = logging.getLogger(__name__)
 
 
-def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 10):
+def train(hyp: dict, opt: argparse.Namespace, device: torch.device, tb_writer: SummaryWriter = None, wlog: bool = False, test_every_epoch: int = 10) -> tuple:
+    """Train the model."""
     logger.info(f"Hyperparameters {hyp}")
     log_dir = (
         Path(tb_writer.log_dir) if tb_writer else Path(opt.logdir) / "evolve"
@@ -83,7 +85,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     # Model
     pretrained = weights.endswith(".pt")
     if pretrained:
-        ## HS: debugger for investigating autoanchor
+        # HS: debugger for investigating autoanchor
         # with torch_distributed_zero_first(rank):
         #     attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
@@ -107,7 +109,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
         model, _ = load_model_from_wandb(
             opt.cfg, device=device, load_weights=not opt.no_weight_wandb
         )
-        for k, v in model.named_parameters():
+        for _, v in model.named_parameters():
             v.requires_grad = True
     else:
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
@@ -130,14 +132,14 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     hyp["weight_decay"] *= total_batch_size * accumulate / nbs  # scale weight_decay
 
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
+    for _, v in model.named_modules():
         if hasattr(v, "bias") and isinstance(v.bias, torch.Tensor):
             pg2.append(v.bias)
         if isinstance(v, nn.BatchNorm2d):
             pg0.append(v.weight)
         elif hasattr(v, "weight") and isinstance(v.weight, torch.Tensor):
             pg1.append(v.weight)
-    for k, v in model.named_parameters():
+    for _, v in model.named_parameters():
         v.requires_grad = True
 
     if opt.adam:
