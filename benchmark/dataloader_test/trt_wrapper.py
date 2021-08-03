@@ -1,18 +1,18 @@
+"""Module for tensorRT wrapper."""
 import argparse
 import atexit
-import ctypes
 import os
-from typing import List, Union
+from typing import Any, Union
 
 import numpy as np
 import nvidia.dali
-import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
 import torch
 
 
-def test_pycuda_install():
+def test_pycuda_install() -> None:
+    """Check the pycuda library is installed."""
     cuda.init()
     print("CUDA device query (PyCUDA version) \n")
     print("Detected {} CUDA Capable device(s) \n".format(cuda.Device.count()))
@@ -68,7 +68,10 @@ def test_pycuda_install():
             print("\t {}: {}".format(k, device_attributes[k]))
 
 
-def torch_dtype_to_trt(dtype):
+def torch_dtype_to_trt(
+    dtype: Union[torch.int8, torch.int32, torch.float16, torch.float32]
+) -> Union[trt.int8, trt.int32, trt.float16, trt.float32]:
+    """Return converted data type (torch -> tensorRT)."""
     if dtype == torch.int8:
         return trt.int8
     elif dtype == torch.int32:
@@ -81,7 +84,10 @@ def torch_dtype_to_trt(dtype):
         raise TypeError("%s is not supported by tensorrt" % dtype)
 
 
-def torch_dtype_from_trt(dtype):
+def torch_dtype_from_trt(
+    dtype: Union[trt.int8, trt.int32, trt.float16, trt.float32]
+) -> Union[torch.int8, torch.int32, torch.float16, torch.float32]:
+    """Return converted data type (tensorRT -> torch)."""
     if dtype == trt.int8:
         return torch.int8
     elif dtype == trt.int32:
@@ -94,7 +100,10 @@ def torch_dtype_from_trt(dtype):
         raise TypeError("%s is not supported by torch" % dtype)
 
 
-def torch_device_to_trt(device):
+def torch_device_to_trt(
+    device: torch.device,
+) -> Union[trt.TensorLocation.DEVICE, trt.TensorLocation.HOST]:
+    """Get torch device and return tensorRT device."""
     if device.type == torch.device("cuda").type:
         return trt.TensorLocation.DEVICE
     elif device.type == torch.device("cpu").type:
@@ -103,7 +112,10 @@ def torch_device_to_trt(device):
         return TypeError("%s is not supported by tensorrt" % device)
 
 
-def torch_device_from_trt(device):
+def torch_device_from_trt(
+    device: Union[trt.TensorLocation.DEVICE, trt.TensorLocation.HOST]
+) -> torch.device:
+    """Get tensorRT device and return torch device."""
     if device == trt.TensorLocation.DEVICE:
         return torch.device("cuda")
     elif device == trt.TensorLocation.HOST:
@@ -112,27 +124,42 @@ def torch_device_from_trt(device):
         return TypeError("%s is not supported by torch" % device)
 
 
-def to_numpy(tensor):
+def to_numpy(tensor: torch.Tensor) -> np.ndarray:
+    """Convert torch tensor to numpy ndarray."""
     return (
         tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
     )
 
 
 class HostDeviceMem(object):
-    def __init__(self, host_mem, device_mem, device_mem_ptr=0):
+    """Host device memory class."""
+
+    def __init__(self, host_mem: Any, device_mem: int, device_mem_ptr: int = 0) -> None:
+        """Initialize HostDeviceMem class."""
         self.host = host_mem
         self.device = device_mem
         self.device_ptr = device_mem_ptr
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """Return device memory string."""
         return "Host:\n" + str(self.host) + "\nDevice:\n" + str(self.device)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Return device memory string."""
         return self.__str__()
 
 
 class TrtWrapper(object):
-    def __init__(self, run_dir, inference_type, batch_size, device, torch_input=True):
+    """TensorRT wrapper class."""
+
+    def __init__(
+        self,
+        run_dir: str,
+        inference_type: str,
+        batch_size: int,
+        device: torch.device,
+        torch_input: bool = True,
+    ) -> None:
         """Output assumed to be torch Tensor(GPU).
 
         Input assumed to be dali_tensor(GPU). if torch_input is set, Input is assumed to
@@ -206,7 +233,7 @@ class TrtWrapper(object):
         # dstroy at exit
         atexit.register(self.destroy)
 
-    def _create_input_buffers(self):
+    def _create_input_buffers(self) -> None:
         self.inputs_ptr = [None] * len(self.input_names)
         for i, name in enumerate(self.input_names):
             idx = self.engine.get_binding_index(name)
@@ -222,7 +249,7 @@ class TrtWrapper(object):
             self.inputs_ptr[i] = device_mem
             self.bindings.append(int(device_mem))
 
-    def _create_output_buffers(self):
+    def _create_output_buffers(self) -> None:
         self.outputs_ptr = [None] * len(self.output_names)
         self.outputs_tensor = [None] * len(self.output_names)
         for i, name in enumerate(self.output_names):
@@ -230,7 +257,7 @@ class TrtWrapper(object):
             shape = self.engine.get_binding_shape(idx)
             trt_type = self.engine.get_binding_dtype(idx)
 
-            size = trt.volume(shape) * self.engine.max_batch_size
+            size = trt.volume(shape) * self.engine.max_batch_size  # noqa: F841
             torch_type = torch_dtype_from_trt(trt_type)
 
             self.outputs_tensor[i] = torch.empty(
@@ -239,29 +266,30 @@ class TrtWrapper(object):
             self.outputs_ptr[i] = self.outputs_tensor[i].data_ptr()
             self.bindings.append(int(self.outputs_ptr[i]))
 
-    def _input_binding_indices(self):
+    def _input_binding_indices(self) -> list:
         return [
             i
             for i in range(self.engine.num_bindings)
             if self.engine.binding_is_input(i)
         ]
 
-    def _output_binding_indices(self):
+    def _output_binding_indices(self) -> list:
         return [
             i
             for i in range(self.engine.num_bindings)
             if not self.engine.binding_is_input(i)
         ]
 
-    def _trt_input_names(self):
+    def _trt_input_names(self) -> list:
         return [self.engine.get_binding_name(i) for i in self._input_binding_indices()]
 
-    def _trt_output_names(self):
+    def _trt_output_names(self) -> list:
         return [self.engine.get_binding_name(i) for i in self._output_binding_indices()]
 
     def __call__(
         self, imgs: Union[torch.Tensor, nvidia.dali.backend_impl.TensorListGPU]
     ) -> torch.Tensor:
+        """Run model."""
         # Data transfer
         self.cfx.push()
 
@@ -313,11 +341,11 @@ class TrtWrapper(object):
             self.outputs_tensor[0],
         )
 
-    def destroy(self):
-        # Remove any context from the top of the context stack, deactivating it.
+    def destroy(self) -> None:
+        """Remove any context from the top of the context stack, deactivating it."""
         self.cfx.pop()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Free CUDA memories."""
         del self.context
         del self.engine

@@ -1,5 +1,4 @@
-import typing
-from collections.abc import Iterable
+"""Module for plot utilities."""
 from typing import Union
 
 import cv2
@@ -10,17 +9,7 @@ import torch
 from utils.general import xywh2xyxy
 
 
-def convert_dali_nparray(img, batch_size):
-    imgs = []
-    import pdb
-
-    pdb.set_trace()
-    for i in range(batch_size):
-        imgs.append(img[i])
-    return np.array(imgs)
-
-
-def empty_gen():
+def empty_gen() -> None:
     """Empty iterator to handle zip."""
     yield from ()
 
@@ -29,8 +18,8 @@ def result_plot_predonly(
     image: Union[torch.Tensor, nvidia.dali.backend_impl.TensorListGPU],
     pred: list,
     batch_size: int = 0,
-):
-    """function for plot result from model(prediction only)."""
+) -> None:
+    """Plot result from model(prediction only)."""
     if isinstance(image, nvidia.dali.backend_impl.TensorListGPU):
         image = image.as_cpu().as_array()
 
@@ -73,8 +62,8 @@ def result_plot_predonly(
 
 def result_plot(
     image: torch.Tensor, targets: torch.Tensor, pred: list, batch_size: int = 0
-):
-    """function for plot result from model."""
+) -> None:
+    """Plot result from model."""
     assert targets is not None
     if isinstance(image, nvidia.dali.backend_impl.TensorListGPU):
         image = image.as_cpu().as_array()
