@@ -1,4 +1,4 @@
-"""Write description here.
+"""Model optimizer with optuna.
 
 - Author: Jongkuk Lim
 - Contact: limjk@jmarple.ai
@@ -7,15 +7,17 @@ import datetime
 from argparse import Namespace
 from pathlib import Path
 from test import test_model_from_wandb_run
-from typing import Tuple, Union
+from typing import Any, List, Tuple, Union
 
 import numpy as np
+import optuna
 import torch
-import wandb
 import yaml
 
+import wandb
 from model_searcher.abstract_optimizer import AbstractOptimizer
-from model_searcher.auto_model_generator.model_generator import *
+from model_searcher.auto_model_generator.model_generator import \
+    AutoModelGenerator
 from model_searcher.optuna_utils import OptunaParameterManager
 from models.yolo import Model
 from utils.general import increment_dir
@@ -24,6 +26,8 @@ from utils.wandb_utils import load_model_from_wandb
 
 
 class ModelSearcher(AbstractOptimizer):
+    """ModelSearcher class."""
+
     def __init__(
         self,
         dataset_path: str,
@@ -47,8 +51,9 @@ class ModelSearcher(AbstractOptimizer):
         wandb_tags: Union[List[str], None] = None,
         wandb_project: str = "auto_yolo",
         not_cache: bool = False,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
+        """Initialize ModelSearcher class."""
         super(ModelSearcher, self).__init__(**kwargs)
         self.workers = workers
         self.device = device
@@ -82,7 +87,7 @@ class ModelSearcher(AbstractOptimizer):
         elif isinstance(img_size, int):
             self.img_size = [img_size] * 2
 
-    def get_opt(self, trial: optuna.trial.Trial, optimize: bool = True) -> Dict:
+    def get_opt(self, trial: optuna.trial.Trial, optimize: bool = True) -> dict:
         """Get training option.
 
         Args:
@@ -131,7 +136,7 @@ class ModelSearcher(AbstractOptimizer):
         low: float,
         high: float,
         n_step: float = 5.0,
-    ):
+    ) -> float:
         """Get optuna trial.suggest float argument splittable by n_step number.
 
         Args:
@@ -143,7 +148,6 @@ class ModelSearcher(AbstractOptimizer):
         Returns:
             optuna trial suggessted value.
         """
-
         step_for_suggest = (high - low) / (n_step - 1)
         return trial.suggest_float(name, low, high, step=step_for_suggest)
 
@@ -152,7 +156,7 @@ class ModelSearcher(AbstractOptimizer):
         trial: optuna.trial.Trial,
         optimize_param: bool = True,
         optimize_augment: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Get hyper-parameter option.
 
         Args:
@@ -163,7 +167,6 @@ class ModelSearcher(AbstractOptimizer):
         Returns:
             Dictionary type of hyper-parameter option.
         """
-
         conf = {
             "param": self.study_param.hyp_param,
             "augment": self.study_param.hyp_augment,
@@ -194,7 +197,8 @@ class ModelSearcher(AbstractOptimizer):
 
         return hyp
 
-    def get_model_cfg(self, trial: optuna.trial.Trial, optimize: bool = True):
+    def get_model_cfg(self, trial: optuna.trial.Trial, optimize: bool = True) -> dict:
+        """Get model config."""
         if not optimize and isinstance(self.fixed_model, str):
             if self.fixed_model.endswith(".yaml"):
                 with open(self.fixed_model, "r") as f:
@@ -209,16 +213,23 @@ class ModelSearcher(AbstractOptimizer):
 
             return cfg
 
-    def get_param_score(self):
+    def get_param_score(self) -> float:
+        """Get parameter score."""
         return self.n_param / (self.study_param.target_param + 1e-9)
 
-    def get_map_score(self, result):
+    def get_map_score(
+        self, result: Union[np.ndarray, torch.Tensor, list, tuple]
+    ) -> float:
+        """Get mAP score."""
         clipped_mAP = min(result[0]["total"][2], self.study_param.target_mAP)
         norm_mAP = 1 - (clipped_mAP / self.study_param.target_mAP)  # To minimize.
 
         return norm_mAP
 
-    def get_time_score(self, time) -> float:
+    def get_time_score(
+        self, time: Union[np.ndarray, list, tuple, torch.Tensor]
+    ) -> float:
+        """Get time score."""
         if self.baseline_time is None or time is None:
             return 1.0
 
@@ -231,7 +242,12 @@ class ModelSearcher(AbstractOptimizer):
             baseline_inference_time + baseline_nms_time
         )
 
-    def get_score(self, result, test_time, skip_wandb: bool = False) -> float:
+    def get_score(
+        self,
+        result: Union[np.ndarray, torch.Tensor, list, tuple],
+        test_time: Union[np.ndarray, torch.Tensor, list, tuple],
+        skip_wandb: bool = False,
+    ) -> float:
         """Get objective score based on the result.
 
         Args:
@@ -265,7 +281,12 @@ class ModelSearcher(AbstractOptimizer):
 
         return score
 
-    def wandb_get_metric_dict(self, result, prefix="epoch"):
+    def wandb_get_metric_dict(
+        self,
+        result: Union[torch.Tensor, np.ndarray, list, tuple],
+        prefix: str = "epoch",
+    ) -> dict:
+        """Get metric for log on wandb."""
         mAPs = {}
         for k, v in result[0].items():
             for i, key in enumerate(["mP", "mR", "mAP0_50", "mAP"]):
@@ -277,13 +298,19 @@ class ModelSearcher(AbstractOptimizer):
 
         return mAPs
 
-    def wandb_get_time_dict(self, test_time, prefix="epoch"):
+    def wandb_get_time_dict(
+        self,
+        test_time: Union[torch.Tensor, np.ndarray, list, tuple],
+        prefix: str = "epoch",
+    ) -> dict:
+        """Get time score for log on wandb."""
         return {
             f"{prefix}.time.{key}": test_time[i]
             for i, key in enumerate(["inference", "nms", "total"])
         }
 
     def raise_trial_pruned(self) -> None:
+        """Raise trial pruned."""
         if self.wandb:
             wandb.finish()
 
@@ -291,13 +318,15 @@ class ModelSearcher(AbstractOptimizer):
 
     @property
     def baseline_time(self) -> Union[Tuple, None]:
+        """Get baseline time."""
         if len(self.baseline_times) == 0:
             return None
         else:
             self.baseline_times = self.baseline_times[-7:]  # Keep the latest only.
             return tuple(np.median(np.array(self.baseline_times), axis=0).tolist())
 
-    def test_baseline_model(self, baseline_path: str):
+    def test_baseline_model(self, baseline_path: str) -> tuple:
+        """Test baseline model for get baseline datas."""
         model, run_wandb = load_model_from_wandb(
             baseline_path,
             weight_path="weights/last.pt",
@@ -324,7 +353,8 @@ class ModelSearcher(AbstractOptimizer):
         torch.cuda.empty_cache()
         return result, maps, times
 
-    def objective(self, trial: optuna.trial.Trial):
+    def objective(self, trial: optuna.trial.Trial) -> float:
+        """Run model to get objective score."""
         self.study_param.set_trial(trial)
 
         optimize_opt = (self.override_optimization and self.optimize_option) or (

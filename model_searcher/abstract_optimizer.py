@@ -65,7 +65,7 @@ class AbstractOptimizer(ABC):
         hyp: dict,
         opt: argparse.Namespace,
         device: torch.device,
-        trial: optuna.trial,
+        trial: optuna.trial.Trial,
     ) -> tuple:
         """Train model with optuna."""
         self.log(f"Hyperparameters {hyp}")
@@ -210,7 +210,7 @@ class AbstractOptimizer(ABC):
                 targets,
                 _paths,
                 _,
-            ) in pbar:  # epoch--batch -------------------------------------------------
+            ) in pbar:  # epoch-batch
                 ni = i + nb * epoch  # number integrated batches (since train start)
                 imgs = (
                     imgs.to(device, non_blocking=True).float() / 255.0
@@ -333,7 +333,7 @@ class AbstractOptimizer(ABC):
         self.logger.log(level, msg)
 
     @abstractmethod
-    def objective(self, trial: optuna.trial) -> Any:  # noqa: D102
+    def objective(self, trial: optuna.trial.Trial) -> Any:  # noqa: D102
         pass
 
     @abstractmethod
@@ -427,7 +427,7 @@ class AbstractOptimizer(ABC):
 
         return study
 
-    def set_worker_attr(self, trial: optuna.trial) -> None:
+    def set_worker_attr(self, trial: optuna.trial.Trial) -> None:
         """Set user attributes with the computer name by 'worker' attribute.
 
         Args:
@@ -446,7 +446,7 @@ if __name__ == "__main__":
             """Initialize test class."""
             super(TestABCOptimizer, self).__init__()
 
-        def objective(self, trial: optuna.trial) -> None:  # noqa
+        def objective(self, trial: optuna.trial.Trial) -> None:  # noqa
             return None
 
     abs_opt = TestABCOptimizer()

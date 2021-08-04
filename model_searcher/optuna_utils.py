@@ -10,7 +10,8 @@ import optuna
 import yaml
 
 
-def load_study_conf(study_conf):
+def load_study_conf(study_conf: str) -> dict:
+    """Load study config."""
     with open(study_conf) as f:
         study_conf = yaml.load(f, yaml.FullLoader)
 
@@ -24,12 +25,13 @@ def load_study_conf(study_conf):
 
 
 def create_load_study_with_config(
-    study_conf,
-    study_name,
+    study_conf: str,
+    study_name: str,
     storage: Union[str, optuna.storages.RDBStorage, None] = None,
     load_if_exists: bool = True,
     overwrite_user_attr: bool = False,
-):
+) -> optuna.study.Study:
+    """Create study with config file."""
     study_conf = load_study_conf(study_conf)
 
     assert study_name != "", "Study name must be given."
@@ -57,7 +59,10 @@ def create_load_study_with_config(
 
 
 class OptunaParameterManager:
-    def __init__(self, study_conf):
+    """Class for manage optuna paramters."""
+
+    def __init__(self, study_conf: str) -> None:
+        """Initialize OptunaParameterManager class."""
         self.local_conf = load_study_conf(study_conf)
 
         self.local_study_attr = self.local_conf["study_attr"]
@@ -66,12 +71,13 @@ class OptunaParameterManager:
         for k in self.local_study_attr.keys():
             self.__setattr__(k, self.__get_property(k))
 
-    def set_trial(self, trial):
+    def set_trial(self, trial: optuna.trial.Trial) -> None:
+        """Set optuna trial."""
         self.trial = trial
         for k in self.trial.study.user_attrs.keys():
             self.__setattr__(k, self.__get_property(k))
 
-    def __get_property(self, name):
+    def __get_property(self, name: str) -> str:
         if self.trial and name in self.trial.study.user_attrs:
             return self.trial.study.user_attrs[name]
         else:
