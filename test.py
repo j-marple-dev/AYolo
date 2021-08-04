@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
-import wandb
 import yaml
 from tqdm import tqdm
 
+import wandb
 from models.experimental import attempt_load
 from utils.datasets import create_dataloader
 from utils.general import (BBoxScore, ap_per_class, box_iou, check_dataset,
@@ -32,7 +32,7 @@ class TestResult:
     def __init__(
         self,
         nc: int,
-        sizes: List[str],
+        sizes: Optional[List[str]] = None,
         class_names: Optional[List[str]] = None,
     ) -> None:
         """Initialize TestResult class."""

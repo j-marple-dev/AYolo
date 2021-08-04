@@ -18,13 +18,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import wandb
 import yaml
 from PIL import Image
 from scipy.cluster.vq import kmeans
 from scipy.signal import butter, filtfilt
 from tqdm import tqdm
 
+import wandb
 from utils.google_utils import gsutil_getsize
 from utils.torch_utils import init_torch_seeds, is_parallel
 

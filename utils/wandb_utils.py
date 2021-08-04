@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Tuple, Union
 
 import torch
 import torch.nn as nn
-import wandb
 import yaml
 
+import wandb
 from models.yolo import Model
 from utils.datasets import create_dataloader
 from utils.general import check_img_size
