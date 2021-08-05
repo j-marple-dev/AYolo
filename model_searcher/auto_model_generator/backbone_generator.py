@@ -5,28 +5,32 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 import optuna
-from scipy.special.cython_special import ker
+
+# from scipy.special.cython_special import ker
 
 
 class ArgGen:
+    """Argument Generator class."""
+
     @staticmethod
     def get_block_args(
-        in_idx,
-        name,
-        channel,
-        n_repeat,
-        expansion,
-        conv_type="Conv",
-        stride=1,
-        kernel_size=3,
-        skip_connection=True,
-        use_se=1,
-        use_hs=1,
-    ):
+        in_idx: int,
+        name: str,
+        channel: int,
+        n_repeat: int,
+        expansion: int,
+        conv_type: str = "Conv",
+        stride: int = 1,
+        kernel_size: int = 3,
+        skip_connection: bool = True,
+        use_se: int = 1,
+        use_hs: int = 1,
+    ) -> list:
+        """Return convolution block arguments."""
         if name == "MBConv":
             return [
                 [in_idx, 1, name, [expansion, channel, n_repeat, stride, kernel_size]]
@@ -73,7 +77,15 @@ class ArgGen:
                 ]
 
     @staticmethod
-    def get_conv_args(in_idx, name, channel, n_repeat=1, stride=1, kernel_size=3):
+    def get_conv_args(
+        in_idx: int,
+        name: str,
+        channel: int,
+        n_repeat: int = 1,
+        stride: int = 1,
+        kernel_size: int = 3,
+    ) -> list:
+        """Get convolution arguments."""
         if name in ["Conv", "DWConv"]:
             return [[in_idx, n_repeat, name, [channel, kernel_size, stride]]]
         elif name == "Focus":
@@ -83,7 +95,10 @@ class ArgGen:
 
 
 class AutoBackboneGeneratorAbstract(ABC):
-    def __init__(self, trial: optuna.trial.Trial, model_name: str):
+    """Abstract class that generates backbone automatically."""
+
+    def __init__(self, trial: optuna.trial.Trial, model_name: str) -> None:
+        """Initialize AutoBackboneGeneratorAbstract class."""
         self.trial = trial
         self.model_name = model_name
 
@@ -97,17 +112,22 @@ class AutoBackboneGeneratorAbstract(ABC):
         """
         pass
 
-    def _get_suggest_name(self, name):
+    def _get_suggest_name(self, name: str) -> str:
+        """Retun suggest name."""
         return f"backbone.{self.model_name}.{name}"
 
 
 class AutoNoBackboneGenerator(AutoBackboneGeneratorAbstract):
+    """Auto generator without backbone layers."""
+
     CHANNEL_STEP = 2
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
+        """Initialize AutoNoBackboneGenerator class."""
         super(AutoNoBackboneGenerator, self).__init__(*args)
 
     def generate_backbone(self) -> Tuple[List[List], List[int]]:
+        """Generate backbone."""
         conv_type = self.trial.suggest_categorical(
             self._get_suggest_name("conv_type"),
             ["Focus", "Conv", "DWConv", "SeparableConv"],
@@ -138,10 +158,14 @@ class AutoNoBackboneGenerator(AutoBackboneGeneratorAbstract):
 
 
 class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
-    def __init__(self, *args):
+    """Efficientnet with backbone generator."""
+
+    def __init__(self, *args: Any) -> None:
+        """Initialize AutoEffNetGenerator class."""
         super(AutoEffNetGenerator, self).__init__(*args)
 
     def generate_backbone(self) -> Tuple[List[List], List[int]]:
+        """Generate Efficientnet backbone."""
         channel_multiple = [1.5, 2.5, 5.0, 7.0, 12.0, 20.0]
         depth_multiple = [1, 1, 1.5, 1.5, 2, 0.5]
         strides = [2, 2, 2, 1, 2, 1]
@@ -264,12 +288,16 @@ class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
 
 
 class AutoDarkNetGenerator(AutoBackboneGeneratorAbstract):
+    """Generate darknet yolo with neck."""
+
     CHANNEL_STEP = 2
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
+        """Initialize AutoDarkNetGenerator."""
         super(AutoDarkNetGenerator, self).__init__(*args)
 
     def generate_backbone(self) -> Tuple[List[List], List[int]]:
+        """Generate backbone network."""
         first_conv = self.trial.suggest_categorical(
             self._get_suggest_name("first_conv"), ["Conv", "Focus"]
         )
@@ -293,7 +321,7 @@ class AutoDarkNetGenerator(AutoBackboneGeneratorAbstract):
 
         conv_type = self.trial.suggest_categorical(
             self._get_suggest_name("conv_type"), ["Conv", "DWConv"]
-        )  #  "SeparableConv"
+        )  # SeparableConv
 
         init_n_channel = self.trial.suggest_int(
             self._get_suggest_name("init_n_channel"),
