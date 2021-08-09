@@ -1,32 +1,57 @@
-# This file contains experimental modules
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
+
+from typing import Any, List, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-from models.common import Conv, DWConv
+from models.common import Conv
 from utils.google_utils import attempt_download
 
 
 class CrossConv(nn.Module):
-    # Cross Convolution Downsample
-    def __init__(self, c1, c2, k=3, s=1, g=1, e=1.0, shortcut=False):
-        # ch_in, ch_out, kernel, stride, groups, expansion, shortcut
+    """Cross convolution and downsample class."""
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        k: int = 3,
+        s: int = 1,
+        g: int = 1,
+        e: float = 1.0,
+        shortcut: bool = False,
+    ) -> None:
+        """Initialize CrossConv class."""
         super(CrossConv, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, (1, k), (1, s))
         self.cv2 = Conv(c_, c2, (k, 1), (s, 1), g=g)
         self.add = shortcut and c1 == c2
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
 class C3(nn.Module):
-    # Cross Convolution CSP
+    """Cross Convolution with CSP."""
+
     def __init__(
-        self, c1, c2, n=1, shortcut=True, g=1, e=0.5
-    ):  # ch_in, ch_out, number, shortcut, groups, expansion
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        shortcut: bool = True,
+        g: int = 1,
+        e: float = 0.5,
+    ) -> None:
+        """Initialize C3 class."""
         super(C3, self).__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
@@ -39,15 +64,21 @@ class C3(nn.Module):
             *[CrossConv(c_, c_, 3, 1, g, 1.0, shortcut) for _ in range(n)]
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         y1 = self.cv3(self.m(self.cv1(x)))
         y2 = self.cv2(x)
         return self.cv4(self.act(self.bn(torch.cat((y1, y2), dim=1))))
 
 
 class Sum(nn.Module):
-    # Weighted sum of 2 or more layers https://arxiv.org/abs/1911.09070
-    def __init__(self, n, weight=False):  # n: number of inputs
+    """Weighted sum of 2 or more layers.
+
+    https://arxiv.org/abs/1911.09070
+    """
+
+    def __init__(self, n: int, weight: bool = False) -> None:  # n: number of inputs
+        """Initialize Sum class."""
         super(Sum, self).__init__()
         self.weight = weight  # apply weights boolean
         self.iter = range(n - 1)  # iter object
@@ -56,7 +87,8 @@ class Sum(nn.Module):
                 -torch.arange(1.0, n) / 2, requires_grad=True
             )  # layer weights
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         y = x[0]  # no weight
         if self.weight:
             w = torch.sigmoid(self.w) * 2
@@ -69,8 +101,20 @@ class Sum(nn.Module):
 
 
 class MixConv2d(nn.Module):
-    # Mixed Depthwise Conv https://arxiv.org/abs/1907.09595
-    def __init__(self, c1, c2, k=(1, 3), s=1, equal_ch=True):
+    """Mixed Depthwise Conv.
+
+    https://arxiv.org/abs/1907.09595
+    """
+
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        k: tuple = (1, 3),
+        s: Union[int, tuple] = 1,
+        equal_ch: bool = True,
+    ) -> None:
+        """Inistialize MixConv2d class."""
         super(MixConv2d, self).__init__()
         groups = len(k)
         if equal_ch:  # equal c_ per group
@@ -95,16 +139,20 @@ class MixConv2d(nn.Module):
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.LeakyReLU(0.1, inplace=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         return x + self.act(self.bn(torch.cat([m(x) for m in self.m], 1)))
 
 
 class Ensemble(nn.ModuleList):
-    # Ensemble of models
-    def __init__(self):
+    """Ensemble of models."""
+
+    def __init__(self) -> None:
+        """Initialize Ensemble class."""
         super(Ensemble, self).__init__()
 
-    def forward(self, x, augment=False):
+    def forward(self, x: torch.Tensor, augment: bool = False) -> torch.Tensor:
+        """Feed forward."""
         y = []
         for module in self:
             y.append(module(x, augment)[0])
@@ -114,8 +162,8 @@ class Ensemble(nn.ModuleList):
         return y, None  # inference, train output
 
 
-def attempt_load(weights, map_location=None):
-    # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
+def attempt_load(weights: Union[List[str], str], map_location: Any = None) -> Union[nn.Module, nn.ModuleList]:
+    """Load an ensemble of models weights or a single model weights or weights=a."""
     model = Ensemble()
     for w in weights if isinstance(weights, list) else [weights]:
         attempt_download(w)
