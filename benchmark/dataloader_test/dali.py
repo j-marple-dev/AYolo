@@ -108,7 +108,7 @@ class DALICOCOIterator(object):
         # We need data about the batches (like shape information),
         # so we need to run a single batch as part of setup to get that info
         self._first_batch = None
-        self._first_batch = next(self)
+        self._first_batch = next(self)  # type: ignore
 
     def __next__(self) -> list:
         """Get next data."""
@@ -144,15 +144,15 @@ class DALICOCOIterator(object):
             images_shape = [x.shape() for x in images]
 
             # Prepare bboxes shapes
-            bboxes_shape = []
+            bboxes_shape: list = []
             for j in range(len(bboxes)):
                 bboxes_shape.append([])
                 for k in range(len(bboxes[j])):
                     bboxes_shape[j].append(bboxes[j][k].shape())
 
             # Prepare labels shapes and offsets
-            labels_shape = []
-            bbox_offsets = []
+            labels_shape: list = []
+            bbox_offsets: list = []
 
             torch.cuda.synchronize()
             for j in range(len(labels)):
@@ -194,7 +194,7 @@ class DALICOCOIterator(object):
                 for offset in bbox_offsets
             ]
 
-            self._data_batches[i][self._current_data_batch] = (
+            self._data_batches[i][self._current_data_batch] = (  # type: ignore
                 pyt_images,
                 pyt_bboxes,
                 pyt_labels,
@@ -209,13 +209,13 @@ class DALICOCOIterator(object):
                 for k in range(len(b_list)):
                     if pyt_bboxes[j][k].shape[0] != 0:
                         feed_ndarray(b_list[k], pyt_bboxes[j][k])
-                pyt_bboxes[j] = torch.cat(pyt_bboxes[j])
+                pyt_bboxes[j] = torch.cat(pyt_bboxes[j])  # type: ignore
 
             for j, l_list in enumerate(labels):
                 for k in range(len(l_list)):
                     if pyt_labels[j][k].shape[0] != 0:
                         feed_ndarray(l_list[k], pyt_labels[j][k])
-                pyt_labels[j] = torch.cat(pyt_labels[j]).squeeze(dim=1)
+                pyt_labels[j] = torch.cat(pyt_labels[j]).squeeze(dim=1)  # type: ignore
 
             for j in range(len(pyt_offsets)):
                 pyt_offsets[j] = torch.IntTensor(bbox_offsets[j])
@@ -289,7 +289,7 @@ class DALIYOLOIterator(object):
         # We need data about the batches (like shape information),
         # so we need to run a single batch as part of setup to get that info
         self._first_batch = None
-        self._first_batch = next(self)
+        self._first_batch = next(self)  # type: ignore
 
     def __next__(self) -> list:
         """Get next data."""
@@ -326,8 +326,8 @@ class DALIYOLOIterator(object):
             images_shape = [x.shape() for x in images]
 
             # Prepare bboxes shapes
-            bboxes_shape = []
-            targets_shape = []
+            bboxes_shape: list = []
+            targets_shape: list = []
             for j in range(len(bboxes)):
                 bboxes_shape.append([])
                 targets_shape.append([])
@@ -338,8 +338,8 @@ class DALIYOLOIterator(object):
                     targets_shape[j].append(shap)
 
             # Prepare labels shapes and offsets
-            labels_shape = []
-            bbox_offsets = []
+            labels_shape: list = []
+            bbox_offsets: list = []
 
             torch.cuda.synchronize()
             for j in range(len(labels)):
@@ -393,7 +393,7 @@ class DALIYOLOIterator(object):
             ]
 
             # self._data_batches[i][self._current_data_batch] = (pyt_images, pyt_bboxes, pyt_labels, pyt_offsets)
-            self._data_batches[i][self._current_data_batch] = (pyt_images, pyt_targets)
+            self._data_batches[i][self._current_data_batch] = (pyt_images, pyt_targets)  # type: ignore
 
             # Copy data from DALI Tensors to torch tensors
             for j, i_arr in enumerate(images):
@@ -422,9 +422,9 @@ class DALIYOLOIterator(object):
                         feed_ndarray(l_list[k], pyt_labels[j][k])
                     idx.append(k * torch.ones_like(pyt_labels[j][k]))
                 indices = torch.cat(idx)
-                bboxes = torch.cat(pyt_bboxes[j])
-                labels = torch.cat(pyt_labels[j])
-                pyt_targets[i] = torch.cat((indices, labels, bboxes), dim=1)
+                t_bboxes = torch.cat(pyt_bboxes[j])
+                t_labels = torch.cat(pyt_labels[j])
+                pyt_targets[i] = torch.cat((indices, t_labels, t_bboxes), dim=1)  # type: ignore
 
         for p in self._pipes:
             p.release_outputs()
@@ -491,6 +491,6 @@ if __name__ == "__main__":
         pipe_iter.release_outputs(),
     )
     dataloader = DALICOCOIterator(pipe_iter, size=10000000)
-    for _nbatch, _data in enumerate(dataloader):
+    for _nbatch, _data in enumerate(dataloader):  # type: ignore
         # do sth
         continue

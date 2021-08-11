@@ -4,7 +4,7 @@
 - Contact: hekim@jmarple.ai
 """
 
-from typing import Any, List, Union
+from typing import TYPE_CHECKING, Any, List, Union
 
 import numpy as np
 import torch
@@ -12,6 +12,9 @@ import torch.nn as nn
 
 from models.common import Conv
 from utils.google_utils import attempt_download
+
+if TYPE_CHECKING:
+    from models.yolo import Model
 
 
 class CrossConv(nn.Module):
@@ -162,19 +165,26 @@ class Ensemble(nn.ModuleList):
         return y, None  # inference, train output
 
 
-def attempt_load(weights: Union[List[str], str], map_location: Any = None) -> Union[nn.Module, nn.ModuleList]:
+def attempt_load(weight: str, map_location: Any = None) -> "Model":
     """Load an ensemble of models weights or a single model weights or weights=a."""
-    model = Ensemble()
-    for w in weights if isinstance(weights, list) else [weights]:
-        attempt_download(w)
-        model.append(
-            torch.load(w, map_location=map_location)["model"].float().fuse().eval()
-        )  # load FP32 model
+    # model = Ensemble()
+    # for w in weights if isinstance(weights, list) else [weights]:
+    #     attempt_download(w)
+    #     model.append(
+    #         torch.load(w, map_location=map_location)["model"].float().fuse().eval()
+    #     )  # load FP32 model
 
-    if len(model) == 1:
-        return model[-1]  # return model
-    else:
-        print("Ensemble created with %s\n" % weights)
-        for k in ["names", "stride"]:
-            setattr(model, k, getattr(model[-1], k))
-        return model  # return ensemble
+    attempt_download(weight)
+
+    model = (
+        torch.load(weight, map_location=map_location)["model"].float().fuse().eval()
+    )  # load FP32 model
+
+    # if len(model) == 1:
+    #     return model[-1]  # return model
+    # else:
+    #     print("Ensemble created with %s\n" % weights)
+    #     for k in ["names", "stride"]:
+    #         setattr(model, k, getattr(model[-1], k))
+    #     return model  # return ensemble
+    return model

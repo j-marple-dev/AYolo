@@ -25,6 +25,12 @@ def print_study_list(storage: str) -> None:
     print("No | .. Start Date .. | nTry | . Score .| ... Name ... |")
     for i, study in enumerate(studies):
         msg = "{:02d} | ".format(i + 1)
+        if (
+            study.datetime_start is None
+            or study.best_trial is None
+            or study.best_trial.value is None
+        ):
+            continue
         msg += "{} | ".format(study.datetime_start.strftime("%Y %m-%d %H:%M"))
         msg += "{:04d} | ".format(study.n_trials)
         msg += (
@@ -147,7 +153,7 @@ def show_records(
             a_msg = " | ".join([f"{k}: {v}" for k, v in attrs.items()])
 
         msg = f"{t.state.name} | {t.number:6,d} | {t.value if t.value else -float('inf'):7.5f} | {p_msg} | {a_msg}"
-        if args.verbose > 0:
+        if args.verbose > 0 and t.datetime_complete is not None and t.duration:
             msg += f" | {t.datetime_complete.strftime('%Y-%m%d-%H:%M:%S')} (runtime - {td2str(t.duration.seconds)})"
         print(msg)
 

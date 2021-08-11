@@ -8,6 +8,7 @@ import shutil
 import test  # import test.py to get mAP after each epoch
 import time
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import torch.distributed as dist
@@ -138,17 +139,20 @@ def train(
     )  # accumulate loss before optimizing
     hyp["weight_decay"] *= total_batch_size * accumulate / nbs  # scale weight_decay
 
-    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
+    pg0: List[torch.Tensor] = []
+    pg1: List[torch.Tensor] = []
+    pg2: List[torch.Tensor] = []  # optimizer parameter groups
     for _, v in model.named_modules():
-        if hasattr(v, "bias") and isinstance(v.bias, torch.Tensor):
-            pg2.append(v.bias)
+        if hasattr(v, "bias") and isinstance(v.bias, torch.Tensor):  # type: ignore
+            pg2.append(v.bias)  # type: ignore
         if isinstance(v, nn.BatchNorm2d):
             pg0.append(v.weight)
-        elif hasattr(v, "weight") and isinstance(v.weight, torch.Tensor):
-            pg1.append(v.weight)
+        elif hasattr(v, "weight") and isinstance(v.weight, torch.Tensor):  # type: ignore
+            pg1.append(v.weight)  # type: ignore
     for _, v in model.named_parameters():
         v.requires_grad = True
 
+    optimizer: torch.optim.Optimizer
     if opt.adam:
         optimizer = optim.Adam(
             pg0, lr=hyp["lr0"], betas=(hyp["momentum"], 0.999)
@@ -219,7 +223,7 @@ def train(
 
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+        model = torch.nn.DataParallel(model)  # type: ignore
 
     # SyncBatchNorm
     if opt.sync_bn and cuda and rank != -1:
@@ -231,7 +235,7 @@ def train(
 
     # DDP mode
     if cuda and rank != -1:
-        model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank)
+        model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank)  # type: ignore
 
     # Trainloader
     dataloader, dataset = create_dataloader(
@@ -262,7 +266,7 @@ def train(
     )
 
     # Process 0
-    if rank in [-1, 0]:
+    if rank in [-1, 0] and ema is not None:
         ema.updates = start_epoch * nb // accumulate  # set EMA updates
         testloader = create_dataloader(
             test_path,
@@ -325,7 +329,9 @@ def train(
         0,
         0,
     )  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
-    scheduler.last_epoch = start_epoch - 1  # do not move
+    # do not move
+    # scheduler has last_epoch attribute.
+    scheduler.last_epoch = start_epoch - 1  # type: ignore
     scaler = amp.GradScaler(enabled=cuda)
     logger.info(
         "Image sizes %g train, %g test\n"
@@ -343,7 +349,7 @@ def train(
             # Generate indices
             if rank in [-1, 0]:
                 cw = (
-                    model.class_weights.cpu().numpy() * (1 - maps) ** 2
+                    model.class_weights.cpu().numpy() * (1 - maps) ** 2  # type: ignore
                 )  # class weights
                 iw = labels_to_image_weights(
                     dataset.labels, nc=nc, class_weights=cw
@@ -369,13 +375,12 @@ def train(
         mloss = torch.zeros(4, device=device)  # mean losses
         if rank != -1:
             dataloader.sampler.set_epoch(epoch)
-        pbar = enumerate(dataloader)
         logger.info(
             ("\n" + "%10s" * 8)
             % ("Epoch", "gpu_mem", "box", "obj", "cls", "total", "targets", "img_size")
         )
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb)  # progress bar
+            pbar = tqdm(enumerate(dataloader), total=nb)  # progress bar
         optimizer.zero_grad()
         for i, (
             imgs,
@@ -465,13 +470,13 @@ def train(
 
                 # Plot
                 if ni < 3:
-                    f = str(log_dir / ("train_batch%g.jpg" % ni))  # filename
+                    f_name = str(log_dir / ("train_batch%g.jpg" % ni))  # filename
                     result = plot_images(
-                        images=imgs, targets=targets, paths=paths, fname=f
+                        images=imgs, targets=targets, paths=paths, fname=f_name
                     )
                     if tb_writer and result is not None:
                         tb_writer.add_image(
-                            f, result, dataformats="HWC", global_step=epoch
+                            f_name, result, dataformats="HWC", global_step=epoch
                         )
                         # tb_writer.add_graph(model, imgs)  # add model to tensorboard
 
@@ -482,7 +487,7 @@ def train(
         scheduler.step()
 
         # DDP process 0 or single-GPU
-        if rank in [-1, 0]:
+        if rank in [-1, 0] and ema is not None:
             # mAP
             if ema:
                 ema.update_attr(
@@ -537,13 +542,13 @@ def train(
                     "metrics/mAP_0.5:0.95",
                 ]
                 for bbox_size in results[0]:
-                    for v, tag in zip(list(results[0][bbox_size]), metric_tags):
+                    for value, tag in zip(list(results[0][bbox_size]), metric_tags):
                         if bbox_size == "total":
                             tag_name = tag
                         else:
                             tag_name = tag + "_" + bbox_size
-                        tb_writer.add_scalar(tag_name, v, epoch)
-                        wandb_data.update({tag_name: v})
+                        tb_writer.add_scalar(tag_name, value, epoch)
+                        wandb_data.update({tag_name: value})  # type: ignore
                 if wlog:
                     wandb.log(wandb_data)
                     wlog_weight(model)
@@ -585,8 +590,8 @@ def train(
         for f1, f2 in zip(
             [wdir / "last.pt", wdir / "best.pt", results_file], [flast, fbest, fresults]
         ):
-            if os.path.exists(f1):
-                os.rename(f1, f2)  # rename
+            if os.path.exists(str(f1)):
+                os.rename(str(f1), str(f2))  # rename
                 if str(f2).endswith(".pt"):  # is *.pt
                     strip_optimizer(f2)  # strip optimizer
                     os.system(
@@ -770,7 +775,7 @@ if __name__ == "__main__":
             group=model_name,
             tags=[model_name],
         )
-        opt.logdir = wandb.run.dir
+        opt.logdir = wandb.run.dir  # type: ignore
 
     # Resume
     if opt.resume:  # resume an interrupted run
@@ -910,10 +915,10 @@ if __name__ == "__main__":
                     hyp[k] = float(x[i + 7] * v[i])  # mutate
 
             # Constrain to limits
-            for k, v in meta.items():
-                hyp[k] = max(hyp[k], v[1])  # lower limit
-                hyp[k] = min(hyp[k], v[2])  # upper limit
-                hyp[k] = round(hyp[k], 5)  # significant digits
+            for key, val in meta.items():
+                hyp[key] = max(hyp[key], val[1])  # lower limit
+                hyp[key] = min(hyp[key], val[2])  # upper limit
+                hyp[key] = round(hyp[key], 5)  # significant digits
 
             # Train mutation
             results = train(hyp.copy(), opt, device)

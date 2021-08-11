@@ -1,3 +1,8 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import math
 
 import torch
@@ -32,17 +37,21 @@ class Swish(nn.Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
+        """Initialize Swish class."""
         super(Swish, self).__init__()
         self.inplace = inplace
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         return F.silu(input)
 
     def extra_repr(self) -> str:
+        """Return extra representations."""
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -53,7 +62,17 @@ class MBConv:
     Note: This could be implemented as function, but intended to follow uppercase convention.
     """
 
-    def __new__(cls, ic, width_multiple, depth_multiple, t, c, n, s, k):
+    def __new__(
+        cls,
+        ic: int,
+        width_multiple: float,
+        depth_multiple: float,
+        t: float,
+        c: float,
+        n: int,
+        s: int,
+        k: int,
+    ) -> nn.Module:
         """Create Inverted Residual block mobilenet v3 version."""
         layers = []
         in_channel = ic
@@ -73,7 +92,7 @@ class MBConv:
             in_channel = output_channel
         return nn.Sequential(*layers)
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Not called."""
         pass
 
@@ -89,21 +108,22 @@ class MBConvBlock(nn.Module):
 
     def __init__(
         self,
-        in_planes,
-        out_planes,
-        expand_ratio,
-        kernel_size,
-        stride,
-        reduction_ratio=4,
-        drop_connect_rate=0.0,
-    ):
+        in_planes: int,
+        out_planes: int,
+        expand_ratio: float,
+        kernel_size: int,
+        stride: int,
+        reduction_ratio: float = 4,
+        drop_connect_rate: float = 0.0,
+    ) -> None:
+        """Initialize MBConvBlock class."""
         super(MBConvBlock, self).__init__()
         self.drop_connect_rate = drop_connect_rate
         self.use_residual = in_planes == out_planes and stride == 1
         assert stride in [1, 2]
         assert kernel_size in [3, 5]
 
-        hidden_dim = in_planes * expand_ratio
+        hidden_dim = int(in_planes * expand_ratio)
         reduced_dim = max(1, in_planes // reduction_ratio)
 
         layers = []
@@ -130,7 +150,7 @@ class MBConvBlock(nn.Module):
         )
         self.conv = nn.Sequential(*layers)
 
-    def _drop_connect(self, x):
+    def _drop_connect(self, x: torch.Tensor) -> torch.Tensor:
         if not self.training:
             return x
         if self.drop_connect_rate >= 1.0:
@@ -142,7 +162,8 @@ class MBConvBlock(nn.Module):
         binary_tensor = random_tensor.floor()
         return x.div(keep_prob) * binary_tensor
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         if self.use_residual:
             return x + self._drop_connect(self.conv(x))
         else:
@@ -150,7 +171,17 @@ class MBConvBlock(nn.Module):
 
 
 class ConvBNReLU(nn.Sequential):
-    def __init__(self, in_planes, out_planes, kernel_size, stride=1, groups=1):
+    """Class with Conv, BatchNorm, ReLU."""
+
+    def __init__(
+        self,
+        in_planes: int,
+        out_planes: int,
+        kernel_size: int,
+        stride: int = 1,
+        groups: int = 1,
+    ) -> None:
+        """Initialize ConvBNReLU class."""
         padding = self._get_padding(kernel_size, stride)
         super(ConvBNReLU, self).__init__(
             nn.ZeroPad2d(padding),
@@ -167,7 +198,7 @@ class ConvBNReLU(nn.Sequential):
             Swish(),
         )
 
-    def _get_padding(self, kernel_size, stride):
+    def _get_padding(self, kernel_size: int, stride: int) -> list:
         p = max(kernel_size - stride, 0)
         return [p // 2, p - p // 2, p // 2, p - p // 2]
 
@@ -181,7 +212,8 @@ def _round_repeats(repeats: int, depth_mult: int) -> int:
 class SqueezeExcitation(nn.Module):
     """Squeeze-Excitation layer used in MBConv."""
 
-    def __init__(self, in_planes, reduced_dim):
+    def __init__(self, in_planes: int, reduced_dim: int) -> None:
+        """Initialize SqueezeExcitation class."""
         super(SqueezeExcitation, self).__init__()
         self.se = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
@@ -191,5 +223,6 @@ class SqueezeExcitation(nn.Module):
             nn.Sigmoid(),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         return x * self.se(x)

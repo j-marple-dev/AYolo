@@ -10,8 +10,6 @@ import shutil
 import sys
 import time
 
-sys.path.append(os.getcwd())  # to run '$ python *.py' files in subdirectories
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -25,8 +23,11 @@ from utils.activations import Hardsigmoid, Hardswish, SiLU, convert_activation
 from utils.general import check_img_size, set_logging
 from utils.wandb_utils import load_model_from_wandb
 
+sys.path.append(os.getcwd())  # to run '$ python *.py' files in subdirectories
 
-def simplify_onnx(onnx_path):
+
+def simplify_onnx(onnx_path: str) -> None:
+    """Simplify the onnx model."""
     model = onnx.load(onnx_path)
     model_simp, check = simplify(model)
     assert check, "Simplified ONNX model could not be validated"
@@ -161,7 +162,7 @@ if __name__ == "__main__":
     )  # image size(1,3,320,192) iDetection
 
     # Update model
-    for k, m in model.named_modules():
+    for _, m in model.named_modules():
         m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
         if isinstance(m, models.common.Conv) and isinstance(m.act, nn.Hardswish):
             m.act = Hardswish()  # assign activation

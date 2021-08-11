@@ -8,9 +8,9 @@ import os
 from typing import Union
 
 import torch
-import wandb
 import yaml
 
+import wandb
 from utils.torch_utils import select_device
 
 

@@ -8,10 +8,12 @@ import os
 import shutil
 import time
 from pathlib import Path
+from typing import Union
 
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
+import torch.nn as nn
 from numpy import random
 
 from models.experimental import attempt_load
@@ -52,7 +54,7 @@ def detect(save_img: bool = False) -> None:
 
     # Load model
     model = attempt_load(weights, map_location=device)  # load FP32 model
-    imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
+    imgs = check_img_size(imgsz, s=torch.max(model.stride))  # type: ignore
     if half:
         model.half()  # to FP16
 
@@ -65,23 +67,27 @@ def detect(save_img: bool = False) -> None:
         )  # load weights
         modelc.to(device).eval()
 
+    dataset: Union[LoadStreams, LoadImages]
+
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
         view_img = True
         cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz)
+        dataset = LoadStreams(source, img_size=imgs)
     else:
         save_img = True
-        dataset = LoadImages(source, img_size=imgsz)
+        dataset = LoadImages(source, img_size=imgs)
 
     # Get names and colors
-    names = model.module.names if hasattr(model, "module") else model.names
+    # names = model.module.names if hasattr(model, "module") else model.names
+    names: list
+    names = model.names
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
     # Run inference
     t0 = time.time()
-    img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
+    img = torch.zeros((1, 3, imgs, imgs), device=device)  # init img
     _ = model(img.half() if half else img) if device.type != "cpu" else None  # run once
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
@@ -110,16 +116,21 @@ def detect(save_img: bool = False) -> None:
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
+            if isinstance(det, nn.Module):
+                continue
             if webcam:  # batch_size >= 1
                 p, s, im0 = path[i], "%g: " % i, im0s[i].copy()
             else:
                 p, s, im0 = path, "", im0s
 
             save_path = str(Path(out) / Path(p).name)
-            txt_path = str(Path(out) / Path(p).stem) + (
-                "_%g" % dataset.frame if dataset.mode == "video" else ""
-            )
-            s += "%gx%g " % img.shape[2:]  # print string
+            if isinstance(dataset, LoadImages):
+                txt_path = str(Path(out) / Path(p).stem) + (
+                    "_%g" % dataset.frame if dataset.mode == "video" else ""
+                )
+            else:
+                txt_path = str(Path(out) / Path(p).stem)
+            s += "%gx%g " % (img.shape[2], img.shape[3])  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
@@ -177,7 +188,9 @@ def detect(save_img: bool = False) -> None:
                         vid_writer = cv2.VideoWriter(
                             save_path, cv2.VideoWriter_fourcc(*fourcc), fps, (w, h)
                         )
-                    vid_writer.write(im0)
+                    if isinstance(vid_writer, cv2.VideoWriter):
+                        vid_writer.write(im0)
+                    # vid_writer.write(im0)
 
     if save_txt or save_img:
         print("Results saved to %s" % Path(out))

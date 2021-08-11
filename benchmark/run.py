@@ -18,13 +18,7 @@ from utils.wandb_utils import read_opt_yaml
 sys.path.append("/usr/src/yolo")  # to run subdirecotires
 
 
-def value_test(
-    torch_model: str,
-    jit_model: str,
-    jit_detect: str,
-    dataloader_config: dict,
-    device: torch.device,
-) -> None:
+def value_test(torch_model: str, jit_model: str, jit_detect: str, dataloader_config: dict, device: torch.device) -> None:
     """Test values of original torch model and jit model."""
     print("[Torch <-> jit] Value test")
 
@@ -62,7 +56,8 @@ def value_test(
                 detect = torch.jit.load(jit_detect, map_location=device)
             except Exception as e:
                 print(f"Load detect failed: {e}, {h, w}")
-            detect.eval()
+            if detect is not None:
+                detect.eval()
 
         img = img.to(device, non_blocking=True)
         # img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -125,9 +120,7 @@ def torch_test(torch_model: str, dataloader_config: dict, device: torch.device) 
     print(f"[PyTorch]: {runtime_end}s")
 
 
-def torchjit_test(
-    jit_model: str, jit_detect: str, dataloader_config: dict, device: torch.device
-) -> None:
+def torchjit_test(jit_model: str, jit_detect: str, dataloader_config: dict, device: torch.device) -> None:
     """Test torch-jit model."""
     print("[jit] Inference Start")
     runtime_start = monotonic()
@@ -157,7 +150,8 @@ def torchjit_test(
                 detect = torch.jit.load(jit_detect, map_location=device)
             except Exception as e:
                 print(f"Load detect failed: {e}, {h, w}")
-            detect.eval()
+            if detect is not None:
+                detect.eval()
         if batch_i == 0:
             print(f"img shape {img.shape}")
         img = img.to(device, non_blocking=True)

@@ -55,7 +55,8 @@ if __name__ == "__main__":
     # Update model(torch script)
     for _, m in model.named_modules():
         m._non_persistent_buffers_set = set()
-    model.model[-1].export = True
+    model.model[-1].export = True  # type: ignore
+
     y = model(img)  # dry run
 
     # Torchjit
