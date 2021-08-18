@@ -318,7 +318,7 @@ def train(
     )  # number of warmup iterations, max(3 epochs, 1k iterations)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     maps = np.zeros(nc)  # mAP per class
-    results = (
+    results: tuple = (
         {
             "total": (0, 0, 0, 0),
             "small": (0, 0, 0, 0),

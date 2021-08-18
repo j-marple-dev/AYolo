@@ -321,7 +321,7 @@ def test(
     verbose: bool = False,
     dataloader: Optional[torch.utils.data.DataLoader] = None,
     plots: bool = False,
-) -> tuple:
+) -> Tuple[tuple, Any, tuple]:
     """Test model and save the results."""
     # Initialize/load model and set device
     training = model is not None
