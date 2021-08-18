@@ -75,6 +75,15 @@ class ArgGen:
                     [in_idx if i == 0 else -1, 1, name, [channel, skip_connection]]
                     for i in range(n_repeat)
                 ]
+        else:
+            assert name in [
+                "MBConv",
+                "InvertedResidualv2",
+                "InvertedResidualv3",
+                "BottleneckCSP",
+                "Bottleneck",
+            ], "Name should be MBConv, InvertedResidualv2, InvertedResidualv3, BottleneckCSP or Bottleneck"
+            return []
 
     @staticmethod
     def get_conv_args(
@@ -92,6 +101,14 @@ class ArgGen:
             return [[in_idx, n_repeat, name, [channel, kernel_size]]]
         elif name == "SeparableConv":
             return [[in_idx, n_repeat, name, [channel, kernel_size, stride]]]
+        else:
+            assert name not in [
+                "Conv",
+                "DWConv",
+                "Focus",
+                "SeparableConv",
+            ], "Name should be Conv, DWConv, Focus or SeparableConv."
+            return []
 
 
 class AutoBackboneGeneratorAbstract(ABC):
@@ -152,7 +169,11 @@ class AutoNoBackboneGenerator(AutoBackboneGeneratorAbstract):
 
         model = []
         for c, k in zip(channels, kernel_sizes):
-            model += ArgGen.get_conv_args(-1, conv_type, c, stride=2, kernel_size=k)
+
+            if isinstance(conv_type, str):
+                model += ArgGen.get_conv_args(-1, conv_type, c, stride=2, kernel_size=k)
+            else:
+                raise TypeError
 
         return model, list(range(depth))
 
@@ -185,8 +206,11 @@ class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
                 self._get_suggest_name("use_p4.strategy"),
                 ["pool_first", "pool_last", "pool_first/drop_last"],
             )
-            pool_first = p4_strategy.split("/")[0] == "pool_first"
-            drop_last_conv = p4_strategy.split("/")[-1] == "drop_last"
+            if isinstance(p4_strategy, str):
+                pool_first = p4_strategy.split("/")[0] == "pool_first"
+                drop_last_conv = p4_strategy.split("/")[-1] == "drop_last"
+            else:
+                raise TypeError
 
             if not pool_first:
                 first_conv = "Conv"
@@ -245,17 +269,20 @@ class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
             )
             for i in range(len(channel_multiple))
         ]
+        if isinstance(first_conv, str) and isinstance(block_type, str):
+            model = ArgGen.get_conv_args(
+                -1,
+                first_conv,
+                init_n_channel * 2,
+                stride=2 if pool_first else 1,
+                kernel_size=3,
+            )
 
-        model = ArgGen.get_conv_args(
-            -1,
-            first_conv,
-            init_n_channel * 2,
-            stride=2 if pool_first else 1,
-            kernel_size=3,
-        )
-        model += ArgGen.get_block_args(
-            -1, block_type, init_n_channel, n_repeat, 1, kernel_size=3
-        )
+            model += ArgGen.get_block_args(
+                -1, block_type, init_n_channel, n_repeat, 1, kernel_size=3
+            )
+        else:
+            raise TypeError
 
         p_idx = []
 
@@ -267,7 +294,8 @@ class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
 
             if strides[i] == 2:
                 p_idx.append(len(model) - 1)
-
+            if not isinstance(conv_type, str):
+                raise TypeError
             model += ArgGen.get_block_args(
                 -1,
                 block_type,
@@ -313,8 +341,11 @@ class AutoDarkNetGenerator(AutoBackboneGeneratorAbstract):
                 self._get_suggest_name("use_p4.strategy"),
                 ["pool_first", "pool_last", "pool_first/drop_last"],
             )
-            pool_first = p4_strategy.split("/")[0] == "pool_first"
-            drop_last_conv = p4_strategy.split("/")[-1] == "drop_last"
+            if isinstance(p4_strategy, str):
+                pool_first = p4_strategy.split("/")[0] == "pool_first"
+                drop_last_conv = p4_strategy.split("/")[-1] == "drop_last"
+            else:
+                raise TypeError
 
             if not pool_first:
                 first_conv = "Conv"
@@ -402,14 +433,14 @@ class AutoDarkNetGenerator(AutoBackboneGeneratorAbstract):
             if pool_first:
                 last_conv_args[-1] = 1
 
-        next_bottleneck = [
+        next_bottleneck: list = [
             -1,
             bottleneck_number * bottleneck_repeat_growth,
             bottleneck,
             [n_channels[3 - ca]],
         ]
         last_conv = [-1, 1, conv_type, last_conv_args]
-        spp_layer = [-1, 1, "SPP", [n_channels[4 - ca], spp_maxpool_kernel]]
+        spp_layer: list = [-1, 1, "SPP", [n_channels[4 - ca], spp_maxpool_kernel]]
         last_bottleneck = [
             -1,
             bottleneck_number,
@@ -419,7 +450,7 @@ class AutoDarkNetGenerator(AutoBackboneGeneratorAbstract):
 
         if drop_last_conv and pool_first:
             if use_spp:
-                spp_layer[-1][0] = n_channels[3 - ca]
+                spp_layer[-1][0] = n_channels[3 - ca]  # type: ignore
                 model.append(spp_layer)
 
             next_bottleneck[-1].append(False)

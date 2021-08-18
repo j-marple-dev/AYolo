@@ -9,7 +9,7 @@ import logging
 import math
 import os
 import random
-from pathlib import Path
+from pathlib import Path, PosixPath
 from typing import Any, Callable, Union
 
 import numpy as np
@@ -23,9 +23,9 @@ import torch.utils.data
 import tqdm
 import yaml
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import Dataset
 
-from utils.datasets import create_dataloader
+from models.yolo import Model
+from utils.datasets import LoadImagesAndLabels, create_dataloader
 from utils.general import (check_dataset, init_seeds, labels_to_class_weights,
                            labels_to_image_weights, strip_optimizer,
                            torch_distributed_zero_first)
@@ -174,9 +174,10 @@ def train_loop_update_pbar_loss_result(
 
 def train_loop_get_multi_scale_imgs(
     imgs: Union[np.ndarray, torch.Tensor], imgsz: float, gs: float
-) -> torch.Tensor:
+) -> Union[np.ndarray, torch.Tensor]:
     """Get multi scale images in train loop."""
-    sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+    # size
+    sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # type: ignore
     sf = sz / max(imgs.shape[2:])  # scale factor
     if sf != 1:
         ns = [
@@ -190,31 +191,32 @@ def train_loop_get_multi_scale_imgs(
 def train_loop_update_image_weight(
     model: nn.Module,
     opt: argparse.Namespace,
-    dataset: Dataset,
+    dataset: LoadImagesAndLabels,
     nc: int,
     maps: np.ndarray,
     rank: int,
-) -> Dataset:
+) -> LoadImagesAndLabels:
     """Get dataset with updated image weight."""
     # Update image weights (optional)
     if opt.image_weights:
         # Generate indices
         if rank in [-1, 0]:
-            cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2  # class weights
+            # cw: class weights
+            cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2  # type: ignore
             iw = labels_to_image_weights(
                 dataset.labels, nc=nc, class_weights=cw
             )  # image weights
-            dataset.indices = random.choices(
+            dataset.indices = random.choices(  # type: ignore
                 range(dataset.n), weights=iw, k=dataset.n
             )  # rand weighted idx
         # Broadcast if DDP
         if rank != -1:
             indices = (
-                torch.tensor(dataset.indices) if rank == 0 else torch.zeros(dataset.n)
+                torch.tensor(dataset.indices) if rank == 0 else torch.zeros(dataset.n)  # type: ignore
             ).int()
             dist.broadcast(indices, 0)
             if rank != 0:
-                dataset.indices = indices.cpu().numpy()
+                dataset.indices = indices.cpu().numpy()  # type: ignore
 
     return dataset
 
@@ -291,9 +293,9 @@ def get_trainloader(
 
 
 def set_model_parameters(
-    model: nn.Module,
+    model: Model,
     hyp: dict,
-    dataset: Dataset,
+    dataset: LoadImagesAndLabels,
     nc: int,
     names: list,
     device: Union[torch.device, str],
@@ -348,6 +350,8 @@ def init_optimizer(model: nn.Module, hyp: dict, opt: argparse.Namespace) -> tupl
     for _, v in model.named_parameters():
         v.requires_grad = True
 
+    optimizer: optim.Optimizer
+
     if opt.adam:
         optimizer = optim.Adam(
             pg0, lr=hyp["lr0"], betas=(hyp["momentum"], 0.999)
@@ -366,7 +370,7 @@ def init_optimizer(model: nn.Module, hyp: dict, opt: argparse.Namespace) -> tupl
 
 
 def strip_optimizer_in_checkpoints(
-    opt: argparse.Namespace, log_dir: str, wdir: str, results_file_path: str
+    opt: argparse.Namespace, log_dir: PosixPath, wdir: PosixPath, results_file_path: str
 ) -> None:
     """Strip optimizer in checkpoints."""
     # Strip optimizers
@@ -380,7 +384,8 @@ def strip_optimizer_in_checkpoints(
         [wdir / "last.pt", wdir / "best.pt", results_file_path],
         [flast, fbest, fresults],
     ):
-        if os.path.exists(f1):
-            os.rename(f1, f2)  # rename
+        if os.path.exists(f1):  # type: ignore
+            # rename
+            os.rename(f1, f2)  # type: ignore
             if str(f2).endswith(".pt"):  # is *.pt
                 strip_optimizer(f2)  # strip optimizer

@@ -13,7 +13,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from argparse import Namespace
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import optuna
@@ -153,10 +153,10 @@ class AbstractOptimizer(ABC):
         # Start training
         t0 = time.time()
         nw = max(
-            round(hyp["warmup_epochs"] * nb), 1e3
+            round(hyp["warmup_epochs"] * nb), 1000
         )  # number of warmup iterations, max(3 epochs, 1k iterations)
         maps = np.zeros(nc)  # mAP per class
-        results = (
+        results: tuple = (
             0,
             0,
             0,
@@ -297,7 +297,7 @@ class AbstractOptimizer(ABC):
 
                 # Update best mAP
                 fi = fitness(
-                    np.array(results[0]["total"]).reshape(1, -1)
+                    np.array(results[0]["total"]).reshape(1, -1)  # type: ignore
                 )  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
                 if fi > best_fitness:
                     best_fitness = fi
@@ -346,10 +346,10 @@ class AbstractOptimizer(ABC):
 
     def optimize(
         self,
-        study_name: Union[str, None] = None,
+        study_name: str,
         storage: Union[str, None] = None,
         engine_kwargs: Union[Dict, None] = None,
-        error_n_retry: int = -1,
+        error_n_retry: float = -1,
         load_if_exists: bool = True,
         pool_size: int = 0,
         pool_pre_ping: bool = False,
@@ -383,7 +383,8 @@ class AbstractOptimizer(ABC):
         )
         n_retry = 0
         study = None
-        last_error_time = 0
+        last_error_time: Union[int, float] = 0
+        rdb_storage: Optional[optuna.storages.BaseStorage]
         while error_n_retry > n_retry:
             try:
                 if storage is not None:
@@ -409,7 +410,12 @@ class AbstractOptimizer(ABC):
                         load_if_exists=load_if_exists,
                     )
 
-                study.optimize(self.objective, n_trials=self.n_trials, n_jobs=n_jobs)
+                if study is not None:
+                    study.optimize(
+                        self.objective, n_trials=self.n_trials, n_jobs=n_jobs
+                    )
+                else:
+                    raise
                 break
             except KeyboardInterrupt:
                 break
@@ -449,9 +455,9 @@ if __name__ == "__main__":
         def objective(self, trial: optuna.trial.Trial) -> None:  # noqa
             return None
 
-    abs_opt = TestABCOptimizer()
+    abs_opt = TestABCOptimizer()  # type: ignore
 
-    tmp_opt = {
+    tmp_opt_dict = {
         "cfg": "models/yolov5s.yaml",
         "data": "./data/test_data.yaml",  # Replace data yaml file
         "hyp": "data/hyp.scratch.yaml",
@@ -476,12 +482,12 @@ if __name__ == "__main__":
 
     import yaml
 
-    with open(tmp_opt["cfg"], "r") as f:
+    with open(tmp_opt_dict["cfg"], "r") as f:  # type: ignore
         cfg = yaml.load(f, yaml.FullLoader)
-    with open(tmp_opt["hyp"], "r") as f:
+    with open(tmp_opt_dict["hyp"], "r") as f:  # type: ignore
         hyp = yaml.load(f, yaml.FullLoader)
 
-    tmp_opt = Namespace(**tmp_opt)
+    tmp_opt = Namespace(**tmp_opt_dict)
     tmp_opt.total_batch_size = tmp_opt.batch_size
 
     import os
@@ -499,4 +505,4 @@ if __name__ == "__main__":
 
     device = select_device(tmp_opt.device, batch_size=tmp_opt.batch_size)
 
-    abs_opt.train(hyp, tmp_opt, device, None)
+    abs_opt.train(hyp, tmp_opt, device, None)  # type: ignore

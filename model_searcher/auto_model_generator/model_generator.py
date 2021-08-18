@@ -74,7 +74,7 @@ class AutoModelGenerator:
         self.neck_generator = eval(f"Auto{self.neck_type}Generator")(
             self.trial, self.neck_type, p_idx
         )
-        neck, feat_idx = self.neck_generator.generate_neck()
+        neck, feat_idx = self.neck_generator.generate_neck()  # type: ignore
 
         if len(neck[0]) > 0:
             head = neck + [[feat_idx, 1, "Detect", ["nc", "anchors"]]]

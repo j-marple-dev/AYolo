@@ -167,18 +167,19 @@ class ModelSearcher(AbstractOptimizer):
         Returns:
             Dictionary type of hyper-parameter option.
         """
+        # ignore because of setattr
         conf = {
-            "param": self.study_param.hyp_param,
-            "augment": self.study_param.hyp_augment,
+            "param": self.study_param.hyp_param,  # type: ignore
+            "augment": self.study_param.hyp_augment,  # type: ignore
         }
 
         hyp = dict()
         for k, v in conf["param"].items():
             if optimize_param and v["suggest"]["range"]:
-                hyp[k] = self.__get_suggest_float(
+                hyp[k] = self.__get_suggest_float(  # type: ignore
                     trial,
                     f"hyp.{k}",
-                    *v["suggest"]["range"],
+                    *v["suggest"]["range"],  # range have 2 values
                     n_step=v["suggest"]["n_step"],
                 )
             else:
@@ -186,10 +187,10 @@ class ModelSearcher(AbstractOptimizer):
 
         for k, v in conf["augment"].items():
             if optimize_augment and v["suggest"]["range"]:
-                hyp[k] = self.__get_suggest_float(
+                hyp[k] = self.__get_suggest_float(  # type: ignore
                     trial,
                     f"hyp.{k}",
-                    *v["suggest"]["range"],
+                    *v["suggest"]["range"],  # range have 2 value
                     n_step=v["suggest"]["n_step"],
                 )
             else:
@@ -197,7 +198,9 @@ class ModelSearcher(AbstractOptimizer):
 
         return hyp
 
-    def get_model_cfg(self, trial: optuna.trial.Trial, optimize: bool = True) -> dict:
+    def get_model_cfg(
+        self, trial: optuna.trial.Trial, optimize: bool = True
+    ) -> Union[dict, str]:
         """Get model config."""
         if not optimize and isinstance(self.fixed_model, str):
             if self.fixed_model.endswith(".yaml"):
@@ -215,14 +218,14 @@ class ModelSearcher(AbstractOptimizer):
 
     def get_param_score(self) -> float:
         """Get parameter score."""
-        return self.n_param / (self.study_param.target_param + 1e-9)
+        return self.n_param / (self.study_param.target_param + 1e-9)  # type: ignore
 
     def get_map_score(
-        self, result: Union[np.ndarray, torch.Tensor, list, tuple]
+        self, result: Union[np.ndarray, torch.Tensor, list, tuple, Any]
     ) -> float:
         """Get mAP score."""
-        clipped_mAP = min(result[0]["total"][2], self.study_param.target_mAP)
-        norm_mAP = 1 - (clipped_mAP / self.study_param.target_mAP)  # To minimize.
+        clipped_mAP = min(result[0]["total"][2], self.study_param.target_mAP)  # type: ignore
+        norm_mAP = 1 - (clipped_mAP / self.study_param.target_mAP)  # type: ignore
 
         return norm_mAP
 
@@ -242,9 +245,9 @@ class ModelSearcher(AbstractOptimizer):
             baseline_inference_time + baseline_nms_time
         )
 
-    def get_score(
+    def get_score(  # type: ignore
         self,
-        result: Union[np.ndarray, torch.Tensor, list, tuple],
+        result: Union[list, tuple],
         test_time: Union[np.ndarray, torch.Tensor, list, tuple],
         skip_wandb: bool = False,
     ) -> float:
@@ -267,7 +270,7 @@ class ModelSearcher(AbstractOptimizer):
         param_score = self.get_param_score()
         time_score = self.get_time_score(test_time)
 
-        score = (mAP_score * self.study_param.mAP_weight) + param_score + time_score
+        score = (mAP_score * self.study_param.mAP_weight) + param_score + time_score  # type: ignore
 
         if self.wandb:
             log_dict = {"epoch.score": score}
@@ -283,7 +286,7 @@ class ModelSearcher(AbstractOptimizer):
 
     def wandb_get_metric_dict(
         self,
-        result: Union[torch.Tensor, np.ndarray, list, tuple],
+        result: Union[list, tuple],
         prefix: str = "epoch",
     ) -> dict:
         """Get metric for log on wandb."""
@@ -358,24 +361,24 @@ class ModelSearcher(AbstractOptimizer):
         self.study_param.set_trial(trial)
 
         optimize_opt = (self.override_optimization and self.optimize_option) or (
-            not self.override_optimization and self.study_param.optimize["opt"]
+            not self.override_optimization and self.study_param.optimize["opt"]  # type: ignore
         )
         optimize_hyp = (self.override_optimization and self.optimize_hyp) or (
-            not self.override_optimization and self.study_param.optimize["hyp"]
+            not self.override_optimization and self.study_param.optimize["hyp"]  # type: ignore
         )
         optimize_augment = (self.override_optimization and self.optimize_augment) or (
-            not self.override_optimization and self.study_param.optimize["augment"]
+            not self.override_optimization and self.study_param.optimize["augment"]  # type: ignore
         )
         search_model = (self.override_optimization and self.search_model) or (
-            not self.override_optimization and self.study_param.optimize["model"]
+            not self.override_optimization and self.study_param.optimize["model"]  # type: ignore
         )
 
-        opt = self.get_opt(trial, optimize=optimize_opt)
+        opt_dict = self.get_opt(trial, optimize=optimize_opt)
         hyp = self.get_hyp(
             trial, optimize_param=optimize_hyp, optimize_augment=optimize_augment
         )
 
-        opt = Namespace(**opt)
+        opt = Namespace(**opt_dict)
 
         opt.cfg = self.get_model_cfg(trial, optimize=search_model)
         opt.total_batch_size = opt.batch_size
@@ -402,19 +405,19 @@ class ModelSearcher(AbstractOptimizer):
                     np.ceil(opt.img_size[0] / max_stride) * max_stride
                 )
 
-        env = {"opt": vars(opt), "hyp": hyp, "cfg": opt.cfg}
+        env: dict = {"opt": vars(opt), "hyp": hyp, "cfg": opt.cfg}
         trial.set_user_attr("n_param", self.n_param)
 
         if (
-            self.n_param > (self.study_param.target_param * self.param_threshold)
+            self.n_param > (self.study_param.target_param * self.param_threshold)  # type: ignore
             or self.n_param < 30000
         ):
             trial.report(0 + self.get_param_score(), 0)
             self.raise_trial_pruned()
 
-        if self.study_param.baseline_path is not None:
+        if self.study_param.baseline_path is not None:  # type: ignore
             baseline_result, baseline_maps, baseline_time = self.test_baseline_model(
-                self.study_param.baseline_path
+                self.study_param.baseline_path  # type: ignore
             )
             self.baseline_times.append(baseline_time[:3])
         else:
@@ -432,10 +435,10 @@ class ModelSearcher(AbstractOptimizer):
                         "params": trial.params,
                         "user_attrs": trial.user_attrs,
                         "study_name": trial.study.study_name,
-                        "target_param": self.study_param.target_param,
-                        "target_mAP": self.study_param.target_mAP,
+                        "target_param": self.study_param.target_param,  # type: ignore
+                        "target_mAP": self.study_param.target_mAP,  # type: ignore
                         "param_threshold": self.param_threshold,
-                        "mAP_score_weight": self.study_param.mAP_weight,
+                        "mAP_score_weight": self.study_param.mAP_weight,  # type: ignore
                     },
                     "baseline": {
                         "mAP0_5": baseline_result[0]["total"][2]
@@ -453,7 +456,7 @@ class ModelSearcher(AbstractOptimizer):
                 tags=[trial.study.study_name]
                 + (self.wandb_tags if self.wandb_tags else []),
             )
-            opt.logdir = wandb.run.dir
+            opt.logdir = wandb.run.dir  # type: ignore
 
         print("Image size: ", opt.img_size)
 

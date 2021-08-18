@@ -4,15 +4,15 @@
 - Contact: lim.jeikei@gmail.com
 """
 
-from typing import Union
+from typing import Optional, Union
 
 import optuna
 import yaml
 
 
-def load_study_conf(study_conf: str) -> dict:
+def load_study_conf(study_conf_file: str) -> dict:
     """Load study config."""
-    with open(study_conf) as f:
+    with open(study_conf_file) as f:
         study_conf = yaml.load(f, yaml.FullLoader)
 
     if "hyp_config" in study_conf:
@@ -30,12 +30,12 @@ def create_load_study_with_config(
     storage: Union[str, optuna.storages.RDBStorage, None] = None,
     load_if_exists: bool = True,
     overwrite_user_attr: bool = False,
-) -> optuna.study.Study:
+) -> Optional[optuna.study.Study]:
     """Create study with config file."""
-    study_conf = load_study_conf(study_conf)
+    study_conf_yaml = load_study_conf(study_conf)
 
     assert study_name != "", "Study name must be given."
-    assert study_conf["direction"] in [
+    assert study_conf_yaml["direction"] in [
         "minimize",
         "maximize",
     ], "Direction must be either 'minimize' or 'maximize'"
@@ -43,7 +43,7 @@ def create_load_study_with_config(
     try:
         study = optuna.create_study(
             study_name=study_name,
-            direction=study_conf["direction"],
+            direction=study_conf_yaml["direction"],
             storage=storage,
             load_if_exists=load_if_exists,
         )
@@ -51,7 +51,7 @@ def create_load_study_with_config(
         print("Study already exists!")
         return None
 
-    for k, v in study_conf["study_attr"].items():
+    for k, v in study_conf_yaml["study_attr"].items():
         if overwrite_user_attr or k not in study.user_attrs:
             study.set_user_attr(k, v)
 
