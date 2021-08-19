@@ -4,7 +4,7 @@
 - Contact: hekim@jmarple.ai
 """
 
-from typing import TYPE_CHECKING, Any, List, Union
+from typing import TYPE_CHECKING, Any, Tuple, Union
 
 import numpy as np
 import torch
@@ -114,7 +114,7 @@ class MixConv2d(nn.Module):
         c1: int,
         c2: int,
         k: tuple = (1, 3),
-        s: Union[int, tuple] = 1,
+        s: Union[int, Tuple[int, int]] = 1,
         equal_ch: bool = True,
     ) -> None:
         """Inistialize MixConv2d class."""
@@ -147,26 +147,26 @@ class MixConv2d(nn.Module):
         return x + self.act(self.bn(torch.cat([m(x) for m in self.m], 1)))
 
 
-class Ensemble(nn.ModuleList):
-    """Ensemble of models."""
-
-    def __init__(self) -> None:
-        """Initialize Ensemble class."""
-        super(Ensemble, self).__init__()
-
-    def forward(self, x: torch.Tensor, augment: bool = False) -> torch.Tensor:
-        """Feed forward."""
-        y = []
-        for module in self:
-            y.append(module(x, augment)[0])
-        # y = torch.stack(y).max(0)[0]  # max ensemble
-        # y = torch.cat(y, 1)  # nms ensemble
-        y = torch.stack(y).mean(0)  # mean ensemble
-        return y, None  # inference, train output
+# class Ensemble(nn.ModuleList):
+#     """Ensemble of models."""
+#
+#     def __init__(self) -> None:
+#         """Initialize Ensemble class."""
+#         super(Ensemble, self).__init__()
+#
+#     def forward(self, x: torch.Tensor, augment: bool = False) -> torch.Tensor:  # type
+#         """Feed forward."""
+#         y = []
+#         for module in self:
+#             y.append(module(x, augment)[0])
+#         # y = torch.stack(y).max(0)[0]  # max ensemble
+#         # y = torch.cat(y, 1)  # nms ensemble
+#         y = torch.stack(y).mean(0)  # mean ensemble
+#         return y, None  # inference, train output
 
 
 def attempt_load(weight: str, map_location: Any = None) -> "Model":
-    """Load an ensemble of models weights or a single model weights or weights=a."""
+    """Load a single model weights."""
     # model = Ensemble()
     # for w in weights if isinstance(weights, list) else [weights]:
     #     attempt_download(w)

@@ -5,6 +5,7 @@
 """
 import argparse
 import sys
+from typing import List, Union
 
 import cv2
 import numpy as np
@@ -40,13 +41,16 @@ def result_plot(
 ) -> None:
     """Plot result from model."""
     assert targets is not None
+    b_image: Union[List[torch.Tensor], torch.Tensor]
 
     if len(image.shape) == 3:
-        image = [
+        b_image = [
             image,
         ]
+    else:
+        b_image = image
 
-    for id, img in enumerate(image):
+    for id, img in enumerate(b_image):
         if isinstance(img, torch.Tensor):
             img = img.cpu().permute(1, 2, 0).numpy()
         else:

@@ -4,6 +4,7 @@
 - Contact: hekim@jmarple.ai
 """
 import math
+from typing import Union, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -62,17 +63,17 @@ class MBConv:
     Note: This could be implemented as function, but intended to follow uppercase convention.
     """
 
-    def __new__(
+    def __new__(  # type: ignore
         cls,
         ic: int,
         width_multiple: float,
         depth_multiple: float,
-        t: float,
-        c: float,
+        t: int,
+        c: int,
         n: int,
         s: int,
         k: int,
-    ) -> nn.Module:
+    ) -> nn.Sequential:
         """Create Inverted Residual block mobilenet v3 version."""
         layers = []
         in_channel = ic
@@ -124,9 +125,9 @@ class MBConvBlock(nn.Module):
         assert kernel_size in [3, 5]
 
         hidden_dim = int(in_planes * expand_ratio)
-        reduced_dim = max(1, in_planes // reduction_ratio)
+        reduced_dim = int(max(1, in_planes // reduction_ratio))
 
-        layers = []
+        layers: List[nn.Module] = []
         # pw
         if in_planes != hidden_dim:
             layers.append(ConvBNReLU(in_planes, hidden_dim, 1))
@@ -158,8 +159,8 @@ class MBConvBlock(nn.Module):
         keep_prob = 1.0 - self.drop_connect_rate
         batch_size = x.size(0)
         random_tensor = keep_prob
-        random_tensor += torch.rand(batch_size, 1, 1, 1, device=x.device)
-        binary_tensor = random_tensor.floor()
+        random_tensor += torch.rand(batch_size, 1, 1, 1, device=x.device)  # type: ignore
+        binary_tensor = random_tensor.floor()  # type: ignore
         return x.div(keep_prob) * binary_tensor
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -198,12 +199,12 @@ class ConvBNReLU(nn.Sequential):
             Swish(),
         )
 
-    def _get_padding(self, kernel_size: int, stride: int) -> list:
+    def _get_padding(self, kernel_size: int, stride: int) -> Union[int, Tuple[int, int, int, int]]:
         p = max(kernel_size - stride, 0)
-        return [p // 2, p - p // 2, p // 2, p - p // 2]
+        return (p // 2, p - p // 2, p // 2, p - p // 2)
 
 
-def _round_repeats(repeats: int, depth_mult: int) -> int:
+def _round_repeats(repeats: int, depth_mult: Union[int, float]) -> int:
     if depth_mult == 1.0:
         return repeats
     return int(math.ceil(depth_mult * repeats))

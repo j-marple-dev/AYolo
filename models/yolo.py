@@ -9,7 +9,7 @@ import math
 import sys
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -36,11 +36,13 @@ logger = logging.getLogger(__name__)
 class Detect(nn.Module):
     """Detection layer class."""
 
-    stride = None  # strides computed during initializing the model
+    stride: Union[
+        List[int], Tuple[int, int], torch.Tensor
+    ] = []  # strides computed during initializing the model
     export = False  # onnx export
 
     def __init__(
-        self, nc: int = 80, anchors: Optional[tuple] = (), ch: Optional[tuple] = ()
+        self, nc: int = 80, anchors: tuple = (), ch: tuple = ()
     ) -> None:  # detection layer
         """Initialize Detect class."""
         super(Detect, self).__init__()
@@ -58,7 +60,9 @@ class Detect(nn.Module):
             nn.Conv2d(x, self.no * self.na, 1) for x in ch
         )  # output conv
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         """Feed forward."""
         # x = x.copy()  # for profiling
         preds = []  # inference output
@@ -84,7 +88,7 @@ class Detect(nn.Module):
                 t0 = (
                     y[..., 0:2] * 2.0 - 0.5 + self.grid[i].to(x[i].device)
                 ) * self.stride[i]
-                t1 = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]
+                t1 = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # type: ignore
                 box_xyxy = self._xywh2xyxy(t0, t1).view(bs, -1, 4)
                 score = y[..., 4:].float().view(bs, -1, self.nc + 1)
 
@@ -104,9 +108,7 @@ class Detect(nn.Module):
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
     @staticmethod
-    def _xywh2xyxy(
-        t0: Union[torch.Tensor, np.ndarray], t1: Union[torch.Tensor, np.ndarray]
-    ) -> torch.Tensor:
+    def _xywh2xyxy(t0: Union[torch.Tensor], t1: Union[torch.Tensor]) -> torch.Tensor:
         """Convert [x, y, w, h] to [x1, y1, x2, y2]."""
         # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
         t = t1 / 2
@@ -127,7 +129,10 @@ class Model(nn.Module):
     """
 
     def __init__(
-        self, cfg: str = "yolov5s.yaml", ch: int = 3, nc: Optional[int] = None
+        self,
+        cfg: Union[str, dict] = "yolov5s.yaml",
+        ch: int = 3,
+        nc: Optional[int] = None,
     ) -> None:  # model, input channels, number of classes
         """Initialize YOLO OD model."""
         super(Model, self).__init__()
@@ -175,7 +180,7 @@ class Model(nn.Module):
 
     def forward(
         self, x: torch.Tensor, augment: bool = False, profile: bool = False
-    ) -> torch.Tensor:
+    ) -> Union[torch.Tensor, tuple]:
         """Feed forward.
 
         Args:
@@ -209,7 +214,9 @@ class Model(nn.Module):
         self, x: torch.Tensor, profile: bool = False
     ) -> Union[torch.Tensor, tuple]:
         """Feed forward once."""
-        y, dt = [], []  # outputs
+        # outputs
+        y: list = []
+        dt: list = []
         # cnt = 0
         # create profile data
         if profile:
@@ -253,7 +260,6 @@ class Model(nn.Module):
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
-            import numpy as np
             import pandas as pd
             from tabulate import tabulate
 
@@ -267,7 +273,7 @@ class Model(nn.Module):
             return x, df
         return x
 
-    def run_profile(self, x: torch.Tensor) -> torch.Tensor:
+    def run_profile(self, x: torch.Tensor) -> Union[torch.Tensor, tuple]:
         """Run profile and return total params."""
         return self.forward_once(x, profile=True)
 
@@ -288,9 +294,7 @@ class Model(nn.Module):
             cp_x.to(device)
         return cp_x
 
-    def _initialize_biases(
-        self, cf: Optional[Union[np.ndarray, torch.Tensor]] = None
-    ) -> None:
+    def _initialize_biases(self, cf: Optional[torch.Tensor] = None) -> None:
         """Initialize biases into Detect(), cf is class frequency."""
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
@@ -329,7 +333,7 @@ class Model(nn.Module):
                 m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                 delattr(m, "bn")  # remove batchnorm
-                m.forward = m.fuseforward  # update forward
+                m.forward = m.fuseforward  # type: ignore
         self.info()
         return self
 
@@ -338,8 +342,10 @@ class Model(nn.Module):
         if type(self.model[-1]) is not NMS:  # if missing NMS
             print("Adding NMS module... ")
             m = NMS()  # module
-            m.f = -1  # from
-            m.i = self.model[-1].i + 1  # index
+            # from
+            m.f = -1  # type: ignore
+            # index
+            m.i = self.model[-1].i + 1  # type: ignore
             self.model.add_module(name="%s" % m.i, module=m)  # add
         return self
 
@@ -348,7 +354,9 @@ class Model(nn.Module):
         model_info(self, verbose)
 
 
-def parse_model(d: dict, ch: list) -> nn.Module:  # model_dict, input_channels(3)
+def parse_model(
+    d: dict, ch: list
+) -> Tuple[nn.Sequential, list]:  # model_dict, input_channels(3)
     """Parse model from model config.
 
     Args:
@@ -390,8 +398,8 @@ def parse_model(d: dict, ch: list) -> nn.Module:  # model_dict, input_channels(3
         (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors
     )  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    # layers, savelist, ch out
+    layers, save, c2 = [], [], ch[-1]  # type: ignore
     for i, (f, n, m, args) in enumerate(
         d["backbone"] + d["head"]
     ):  # from, number, module, args

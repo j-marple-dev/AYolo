@@ -1,6 +1,6 @@
 """This file contains modules common to various models."""
 import math
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -10,11 +10,11 @@ from utils.general import non_max_suppression
 
 
 def make_divisible_tf(
-    v: int,
-    divisor: int,
+    v: Union[int, float],
+    divisor: Union[int, float],
     min_value: Optional[Union[float, int]] = None,
     minimum_check_number: int = 256,
-) -> Union[int, float]:
+) -> int:
     """Make all layer's channel number is divisible by 8.
 
     This function is taken from the original tf repo.
@@ -32,12 +32,13 @@ def make_divisible_tf(
     # Make sure that round down does not go down by more than 10%.
     if new_v < 0.9 * v:
         new_v += divisor
-    return new_v
+    return int(new_v)
 
 
 def autopad(
-    k: Union[int, list, tuple], p: Optional[Union[int, str]] = None
-) -> Union[int, list]:  # kernel, padding
+    k: Union[int, list, Tuple[int, int]],
+    p: Optional[Union[int, str, Tuple[int, int], List[int]]] = None,
+) -> Union[int, List[int], Tuple[int, int], str]:  # kernel, padding
     """Pad automatically."""
     # Pad to 'same'
     if p is None:
@@ -46,7 +47,7 @@ def autopad(
 
 
 def DWConv(
-    c1: int, c2: int, k: Union[int, tuple] = 1, s: int = 1, act: bool = True
+    c1: int, c2: int, k: Union[int, Tuple[int, int]] = 1, s: int = 1, act: bool = True
 ) -> nn.Module:
     """Create depthwise convolution layer.
 
@@ -65,15 +66,15 @@ class SeparableConv(nn.Module):
         self,
         c1: int,
         c2: int,
-        k: Union[int, tuple] = 1,
-        s: Union[int, tuple] = 1,
-        p: Optional[Union[int, tuple, str]] = None,
+        k: Union[int, Tuple[int, int]] = 1,
+        s: Union[int, Tuple[int, int]] = 1,
+        p: Optional[Union[int, Tuple[int, int], str]] = None,
         act: bool = True,
         bias: bool = False,
     ) -> None:
         """Initialize depthwise seperable convolution layer."""
         super(SeparableConv, self).__init__()
-        self.conv1 = nn.Conv2d(c1, c1, k, s, autopad(k, p), groups=c1, bias=bias)
+        self.conv1 = nn.Conv2d(c1, c1, k, s, autopad(k, p), groups=c1, bias=bias)  # type: ignore
         self.conv2 = nn.Conv2d(c1, c2, 1, 1, 0, bias=bias)
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.Hardswish() if act else nn.Identity()
@@ -95,18 +96,24 @@ class MaxPool2dStaticSamePadding(nn.Module):
         """Initialize max pool 2d static same padding."""
         super().__init__()
         self.pool = nn.MaxPool2d(*args, **kwargs)
-        self.stride = self.pool.stride
-        self.kernel_size = self.pool.kernel_size
+        temp_stride = self.pool.stride
+        temp_kernel_size = self.pool.kernel_size
 
-        if isinstance(self.stride, int):
-            self.stride = [self.stride] * 2
-        elif len(self.stride) == 1:
-            self.stride = [self.stride[0]] * 2
+        self.stride: Union[List[int], Tuple[int, int]]
+        self.kernel_size: Union[List[int], Tuple[int, int]]
+        if isinstance(temp_stride, int):
+            self.stride = [temp_stride] * 2
+        elif len(temp_stride) == 1:
+            self.stride = [temp_stride[0]] * 2
+        else:
+            self.stride = temp_stride
 
-        if isinstance(self.kernel_size, int):
-            self.kernel_size = [self.kernel_size] * 2
+        if isinstance(temp_kernel_size, int):
+            self.kernel_size = [temp_kernel_size] * 2
         elif len(self.kernel_size) == 1:
-            self.kernel_size = [self.kernel_size[0]] * 2
+            self.kernel_size = [temp_kernel_size[0]] * 2
+        else:
+            self.kernel_size = temp_kernel_size
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Feed forward."""
@@ -153,9 +160,9 @@ class Conv(nn.Module):
         self,
         c1: int,
         c2: int,
-        k: Union[int, tuple] = 1,
-        s: Optional[Union[int, tuple]] = 1,
-        p: Optional[Union[int, tuple, str]] = None,
+        k: Union[int, Tuple[int, int]] = 1,
+        s: Optional[Union[int, Tuple[int, int]]] = 1,
+        p: Optional[Union[int, Tuple[int, int], str]] = None,
         g: int = 1,
         act: bool = True,
     ) -> None:
@@ -173,7 +180,7 @@ class Conv(nn.Module):
             act: activate Hardswish if True
         """
         super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)  # type: ignore
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.Hardswish() if act else nn.Identity()
 
@@ -291,9 +298,9 @@ class Focus(nn.Module):
         self,
         c1: int,
         c2: int,
-        k: Union[tuple, int] = 1,
-        s: Union[int, tuple, str] = 1,
-        p: Optional[Union[int, tuple, str]] = None,
+        k: Union[int, Tuple[int, int]] = 1,
+        s: Union[int, Tuple[int, int]] = 1,
+        p: Optional[Union[int, Tuple[int, int], str]] = None,
         g: int = 1,
         act: bool = True,
     ) -> None:
@@ -334,9 +341,11 @@ class Concat(nn.Module):
         super(Concat, self).__init__()
         self.d = dimension
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Union[Tuple[torch.Tensor, ...], List[torch.Tensor]]
+    ) -> torch.Tensor:
         """Feed forward."""
-        return torch.cat(x, self.d)
+        return torch.cat(x, dim=self.d)
 
 
 class NMS(nn.Module):
@@ -373,16 +382,16 @@ class Classify(nn.Module):
         self,
         c1: int,
         c2: int,
-        k: Union[int, tuple] = 1,
-        s: Union[int, tuple] = 1,
-        p: Union[str, int, tuple] = None,
+        k: Union[int, Tuple[int, int]] = 1,
+        s: Union[int, Tuple[int, int]] = 1,
+        p: Union[str, int, Tuple[int, int]] = None,
         g: int = 1,
     ) -> None:
         """Initialize classify class."""
         super(Classify, self).__init__()
         self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
         self.conv = nn.Conv2d(
-            c1, c2, k, s, autopad(k, p), groups=g, bias=False
+            c1, c2, k, s, autopad(k, p), groups=g, bias=False  # type: ignore
         )  # to x(b,c2,1,1)
         self.flat = Flatten()
 

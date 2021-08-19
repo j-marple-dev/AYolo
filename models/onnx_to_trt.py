@@ -160,32 +160,32 @@ def build_engine(
         fc = []
         fc.append(
             trt.PluginField(
-                "shareLocation", np.array([1], dtype=np.int), trt.PluginFieldType.INT32
+                "shareLocation", np.array([1], dtype=int), trt.PluginFieldType.INT32
             )
         )
         fc.append(
             trt.PluginField(
                 "backgroundLabelId",
-                np.array([-1], dtype=np.int),
+                np.array([-1], dtype=int),
                 trt.PluginFieldType.INT32,
             )
         )
         fc.append(
             trt.PluginField(
                 "numClasses",
-                np.array([num_classes], dtype=np.int),
+                np.array([num_classes], dtype=int),
                 trt.PluginFieldType.INT32,
             )
         )
         fc.append(
             trt.PluginField(
-                "topK", np.array([top_k], dtype=np.int), trt.PluginFieldType.INT32
+                "topK", np.array([top_k], dtype=int), trt.PluginFieldType.INT32
             )
         )
         fc.append(
             trt.PluginField(
                 "keepTopK",
-                np.array([keep_top_k], dtype=np.int),
+                np.array([keep_top_k], dtype=int),
                 trt.PluginFieldType.INT32,
             )
         )
@@ -205,12 +205,12 @@ def build_engine(
         )
         fc.append(
             trt.PluginField(
-                "isNormalized", np.array([0], dtype=np.int), trt.PluginFieldType.INT32
+                "isNormalized", np.array([0], dtype=int), trt.PluginFieldType.INT32
             )
         )
         fc.append(
             trt.PluginField(
-                "clipBoxes", np.array([0], dtype=np.int), trt.PluginFieldType.INT32
+                "clipBoxes", np.array([0], dtype=int), trt.PluginFieldType.INT32
             )
         )
 
@@ -374,9 +374,12 @@ def profile_torch(
     device: Optional[str] = None,
 ) -> Optional[list]:
     """Profile torch model."""
-    device = select_device(device)
+    if device:
+        torch_device = select_device(device)
+    else:
+        torch_device = select_device("")
 
-    model.to(device)
+    model.to(torch_device)
 
     total_duration = 0.0
     total_compute_duration = 0.0
@@ -390,7 +393,7 @@ def profile_torch(
     for iteration in range(num_iters):
         pre_t = time.time()
         # set host data
-        img = torch.from_numpy(input_img_array).float().to(device)
+        img = torch.from_numpy(input_img_array).float().to(torch_device)
         if using_half:
             img = img.half()
         start_t = time.time()
@@ -433,7 +436,7 @@ def non_max_suppression(
     merge: bool = False,
     classes: Union[np.ndarray, list] = None,
     agnostic: bool = False,
-) -> Union[tuple, torch.Tensor, np.ndarray]:
+) -> Union[tuple, torch.Tensor, np.ndarray, list]:
     """Perform Non-Maximum Suppression (NMS) on inference results.
 
     Returns:
@@ -587,11 +590,11 @@ if __name__ == "__main__":
         calib_imgs_path=opt.calib_imgs,
         gpu_mem=opt.gpu_mem,
     )
-    with open(engine_file, "wb") as f:
-        f.write(trt_engine.serialize())
+    with open(engine_file, "wb") as wb_f:
+        wb_f.write(trt_engine.serialize())
 
-    with open(engine_file, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
-        trt_engine = runtime.deserialize_cuda_engine(f.read())
+    with open(engine_file, "rb") as rb_f, trt.Runtime(TRT_LOGGER) as runtime:
+        trt_engine = runtime.deserialize_cuda_engine(rb_f.read())
 
     trt_config_file = os.path.join(opt.expdir, "trt", "trt_config.yaml")
     with open(trt_config_file, "w") as f:

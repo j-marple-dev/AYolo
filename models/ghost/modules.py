@@ -3,7 +3,7 @@
 - Author: Haneol Kim
 - Contact: hekim@jmarple.ai
 """
-from typing import Any, Optional
+from typing import Any, Optional, Type
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,7 @@ class GhostBottleneck:
     Note: This could be implemented as function, but intended to follow uppercase convention.
     """
 
-    def __new__(
+    def __new__(  # type: ignore
         cls,
         ic: int,
         width_multiple: float,
@@ -62,7 +62,7 @@ class GhostBottleneckModule(nn.Module):
         out_chs: int,
         dw_kernel_size: int = 3,
         stride: int = 1,
-        act_layer: nn.Module = nn.ReLU,
+        act_layer: Type[nn.Module] = nn.ReLU,
         se_ratio: float = 0.0,
     ) -> None:
         """Initialize GhostBottleneckModule class."""
@@ -87,6 +87,7 @@ class GhostBottleneckModule(nn.Module):
             self.bn_dw = nn.BatchNorm2d(mid_chs)
 
         # Squeeze-and-excitation
+        self.se: Optional[SqueezeExcite]
         if has_se:
             self.se = SqueezeExcite(mid_chs, se_ratio=se_ratio)
         else:
@@ -194,8 +195,8 @@ class SqueezeExcite(nn.Module):
         in_chs: int,
         se_ratio: float = 0.25,
         reduced_base_chs: Optional[int] = None,
-        act_layer: nn.Module = nn.ReLU,
-        gate_fn: nn.Module = nn.Hardsigmoid,
+        act_layer: Type[nn.Module] = nn.ReLU,
+        gate_fn: Type[nn.Module] = nn.Hardsigmoid,
         divisor: int = 4,
         **_: Any
     ) -> None:
@@ -207,7 +208,7 @@ class SqueezeExcite(nn.Module):
         )
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.conv_reduce = nn.Conv2d(in_chs, reduced_chs, 1, bias=True)
-        self.act1 = act_layer(inplace=True)
+        self.act1 = act_layer(inplace=True)  # type: ignore
         self.conv_expand = nn.Conv2d(reduced_chs, in_chs, 1, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -4,7 +4,7 @@
 - Contact: limjk@jmarple.ai
 """
 
-from typing import List
+from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -42,19 +42,19 @@ class FuseSum(nn.Module):
             )  # layer weights
             self.w_act = nn.ReLU(inplace=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Union[Tuple[torch.Tensor, ...], List[torch.Tensor]]) -> torch.Tensor:
         """Feed forward."""
-        x = torch.stack(x)
+        x_stack = torch.stack(x)
         if self.weighted_fuse:
             self.w_act.inplace = False
 
             weight_act = self.w_act(self.weight)
             weight = weight_act / (torch.sum(weight_act, dim=0) + self.epsilon)
-            weight_dim = weight.view([self.n] + [1] * (len(x.shape) - 1))
+            weight_dim = weight.view([self.n] + [1] * (len(x_stack.shape) - 1))
 
-            out = (x * weight_dim).sum(dim=0)
+            out = (x_stack * weight_dim).sum(dim=0)
         else:
-            out = x.sum(dim=0)
+            out = x_stack.sum(dim=0)
 
         out = self.act(out)
 
@@ -168,7 +168,7 @@ class BiFPN(nn.Module):
         self.op_p6_down_fuse = FuseSum(3)
         self.op_p7_down_fuse = FuseSum(2)
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
         """Feed forward.
 
         Args:

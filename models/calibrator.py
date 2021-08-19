@@ -141,10 +141,10 @@ class YOLOEntropyCalibrator(trt.IInt8EntropyCalibrator2):
             img = cv2.imread(img_path)
             assert img is not None, "failed to read %s" % img_path
             batch.append(_preprocess_yolo(img, self.net_hw))
-        batch = np.stack(batch)
-        assert batch.nbytes == self.blob_size
+        batch_n = np.stack(batch)
+        assert batch_n.nbytes == self.blob_size
 
-        cuda.memcpy_htod(self.device_input, np.ascontiguousarray(batch))
+        cuda.memcpy_htod(self.device_input, np.ascontiguousarray(batch_n))
         self.current_index += self.batch_size
         return [self.device_input]
 
@@ -155,6 +155,8 @@ class YOLOEntropyCalibrator(trt.IInt8EntropyCalibrator2):
         if os.path.exists(self.cache_file):
             with open(self.cache_file, "rb") as f:
                 return f.read()
+        else:
+            raise FileNotFoundError
 
     def write_calibration_cache(self, cache: bytes) -> None:
         """Write calibration cache."""

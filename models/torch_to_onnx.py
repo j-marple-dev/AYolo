@@ -147,7 +147,7 @@ if __name__ == "__main__":
     stride = int(max(model.stride))
 
     if opt.rect:
-        img_shape = np.ceil(np.array((h, w)) / stride + opt.pad).astype(np.int) * stride
+        img_shape = np.ceil(np.array((h, w)) / stride + opt.pad).astype(int) * stride
     else:
         img_shape = (max(h, w),) * 2
 
@@ -168,7 +168,8 @@ if __name__ == "__main__":
             m.act = Hardswish()  # assign activation
         # if isinstance(m, models.yolo.Detect):
         #     m.forward = m.forward_export  # assign forward (optional)
-    model.model[-1].export = True  # set Detect() layer export=True
+    # set Detect() layer export=True
+    model.model[-1].export = True  # type: ignore
     y = model(img)  # dry run
 
     base_config["Dataset"]["batch_size"] = opt.batch_size
@@ -191,14 +192,14 @@ if __name__ == "__main__":
     if opt.torchscript:
         try:
             print("\nStarting TorchScript export with torch %s..." % torch.__version__)
-            f = weight_file.replace(".pt", ".torchscript.pt")  # filename
+            f_n = weight_file.replace(".pt", ".torchscript.pt")  # filename
             ts = torch.jit.trace(model, img)
-            ts.save(f)
+            ts.save(f_n)
             import tempfile
             import zipfile
 
             tempdir = tempfile.mkdtemp()
-            zipf = f
+            zipf = f_n
             try:
                 tempname = os.path.join(tempdir, "test.zip")
                 with zipfile.ZipFile(zipf, "r") as zipread:
@@ -223,11 +224,11 @@ if __name__ == "__main__":
 
         print("\nStarting ONNX export with onnx %s..." % onnx.__version__)
         onnx_name = f"b{opt.batch_size}.onnx"
-        f = os.path.join(export_dir, onnx_name)  # filename
+        f_name = os.path.join(export_dir, onnx_name)  # filename
         torch.onnx.export(
             model,
             img,
-            f,
+            f_name,
             verbose=False,
             opset_version=11,
             input_names=["images"],
@@ -235,11 +236,11 @@ if __name__ == "__main__":
         )
 
         # Checks
-        onnx_model = onnx.load(f)  # load onnx model
+        onnx_model = onnx.load(f_name)  # load onnx model
         onnx.checker.check_model(onnx_model)  # check onnx model
-        simplify_onnx(f)
+        simplify_onnx(f_name)
         # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
-        print("ONNX export success, saved as %s" % f)
+        print("ONNX export success, saved as %s" % f_name)
     except Exception as e:
         print("ONNX export failure: %s" % e)
 
@@ -259,7 +260,7 @@ if __name__ == "__main__":
                 ],
             )
             f = weight_file.replace(".pt", ".mlmodel")  # filename
-            model.save(f)
+            model.save(f)  # type: ignore
             print("CoreML export success, saved as %s" % f)
         except Exception as e:
             print("CoreML export failure: %s" % e)
