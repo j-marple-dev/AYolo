@@ -102,7 +102,7 @@ def test(
             imgs,
             batch_size,
             # torch.max(model.stride) if model.stride is not None else 32,
-            32 if model.stride is None else torch.max(model.stride),
+            32 if model.stride is None else int(torch.max(model.stride)),
             opt,
             hyp=None,
             augment=False,

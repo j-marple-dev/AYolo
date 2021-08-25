@@ -4,7 +4,7 @@
 - Contact: hekim@jmarple.ai
 """
 import math
-from typing import Union, List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -199,7 +199,9 @@ class ConvBNReLU(nn.Sequential):
             Swish(),
         )
 
-    def _get_padding(self, kernel_size: int, stride: int) -> Union[int, Tuple[int, int, int, int]]:
+    def _get_padding(
+        self, kernel_size: int, stride: int
+    ) -> Union[int, Tuple[int, int, int, int]]:
         p = max(kernel_size - stride, 0)
         return (p // 2, p - p // 2, p // 2, p - p // 2)
 

@@ -3,7 +3,7 @@
 - Author: Haneol Kim
 - Contact: hekim@jmarple.ai
 """
-from typing import Optional, Type, List
+from typing import List, Optional, Type
 
 import torch
 import torch.nn as nn

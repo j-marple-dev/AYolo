@@ -3,9 +3,10 @@
 - Author: Haneol Kim
 - Contact: hekim@jmarple.ai
 """
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 from models.common import make_divisible_tf
 
@@ -47,7 +48,16 @@ class InvertedResidual(nn.Module):
         https://github.com/d-li14/mobilenetv3.pytorch/blob/master/mobilenetv3.py
     """
 
-    def __init__(self, inp: int, hidden_dim: int, oup: int, kernel_size: int, stride: int, use_se: bool, use_hs: bool) -> None:
+    def __init__(
+        self,
+        inp: int,
+        hidden_dim: int,
+        oup: int,
+        kernel_size: int,
+        stride: int,
+        use_se: bool,
+        use_hs: bool,
+    ) -> None:
         """Initialize InvertedResidual class."""
         super(InvertedResidual, self).__init__()
         assert stride in [1, 2]

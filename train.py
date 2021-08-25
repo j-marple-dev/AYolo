@@ -374,7 +374,7 @@ def train(
 
         mloss = torch.zeros(4, device=device)  # mean losses
         if rank != -1:
-            dataloader.sampler.set_epoch(epoch)
+            dataloader.sampler.set_epoch(epoch)  # type: ignore
         logger.info(
             ("\n" + "%10s" * 8)
             % ("Epoch", "gpu_mem", "box", "obj", "cls", "total", "targets", "img_size")

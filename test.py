@@ -600,7 +600,7 @@ def get_profile_stats(
         data_config["val"],
         imgsz,
         opt.batch,
-        model.stride.max(),
+        max(model.stride),
         opt,
         hyp=None,
         augment=False,

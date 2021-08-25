@@ -42,7 +42,9 @@ class FuseSum(nn.Module):
             )  # layer weights
             self.w_act = nn.ReLU(inplace=False)
 
-    def forward(self, x: Union[Tuple[torch.Tensor, ...], List[torch.Tensor]]) -> torch.Tensor:
+    def forward(
+        self, x: Union[Tuple[torch.Tensor, ...], List[torch.Tensor]]
+    ) -> torch.Tensor:
         """Feed forward."""
         x_stack = torch.stack(x)
         if self.weighted_fuse:
