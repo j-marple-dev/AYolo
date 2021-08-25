@@ -1,16 +1,19 @@
-import os
-import sys
+"""Module Description.
 
-import torch
-import yaml
-
-sys.path.append(os.getcwd())
-
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import argparse
 import datetime
+import os
+import sys
+from typing import List, Optional, Union
 
 import multiprocess
 import numpy as np
+import torch
+import torch.nn as nn
+import yaml
 from nvidia.dali.plugin.pytorch import DALIGenericIterator
 from tqdm import tqdm
 
@@ -24,22 +27,36 @@ from tensorrt_run.trt_utils.tensorrt_utils import (TrtWrapper,
 from utils.general import non_max_suppression
 from utils.torch_utils import select_device
 
+sys.path.append(os.getcwd())
 
-def get_filepath(abs_path, path):
+
+def get_filepath(abs_path: str, path: str) -> str:
+    """Get file path."""
     return os.path.join(os.path.dirname(os.path.realpath(abs_path)), path)
 
 
-def to_numpy(x):
+def to_numpy(
+    x: Optional[Union[np.ndarray, list, float, int]]
+) -> Optional[Union[np.ndarray, List[np.ndarray]]]:
+    """Convert list to numpy array."""
     if x is None:
         return None
     if isinstance(x, list):
-        return [to_numpy(i) for i in x]
+        return [to_numpy(i) for i in x]  # type: ignore
     if isinstance(x, np.ndarray):
         return x
     return np.array(x)
 
 
-def load_model(model_path, model_type, data_type, dataloader, batch_size, device):
+def load_model(
+    model_path: str,
+    model_type: str,
+    data_type: str,
+    dataloader: str,
+    batch_size: int,
+    device: torch.device,
+) -> nn.Module:
+    """Load torch or trt model."""
     if model_type == "torch":
         model = torch.jit.load(
             os.path.join(model_path, "best.torchscript.pt"), map_location=device
@@ -58,14 +75,16 @@ def load_model(model_path, model_type, data_type, dataloader, batch_size, device
     return model
 
 
-def get_params(model_path):
+def get_params(model_path: str) -> int:
+    """Get number of model parameters."""
     model_path = get_filepath(__file__, os.path.join(model_path, "best.torchscript.pt"))
     param_check_model = torch.jit.load(model_path, map_location="cpu")
     return sum(p.numel() for p in param_check_model.parameters())
 
 
 @torch.no_grad()
-def run_torchdl(config) -> ResultWriterBase:
+def run_torchdl(config: dict) -> ResultWriterBase:
+    """Run torch dataloader."""
     device = select_device(config["device"])
     model = load_model(
         config["path"],
@@ -81,7 +100,7 @@ def run_torchdl(config) -> ResultWriterBase:
     )
     result_writer.start()
 
-    for batch_idx, (imgs, paths, shapes, targets) in enumerate(tqdm(dataloader)):
+    for _batch_idx, (imgs, paths, shapes, _targets) in enumerate(tqdm(dataloader)):
         imgs = imgs.to(device, non_blocking=True)
         imgs = torch.div(imgs, 255.0)
 
@@ -103,7 +122,8 @@ def run_torchdl(config) -> ResultWriterBase:
     return result_writer
 
 
-def run_dali(config) -> ResultWriterDali:
+def run_dali(config: dict) -> ResultWriterDali:
+    """Run dali dataloader."""
     device = select_device(config["device"])
     t0 = datetime.datetime.now()
     model = load_model(
@@ -126,7 +146,7 @@ def run_dali(config) -> ResultWriterDali:
             loader = DALIGenericIterator(
                 pipeline, ["img", "img_id"], size=pipeline.size
             )
-            for i, data in tqdm(enumerate(loader)):
+            for _, data in tqdm(enumerate(loader)):
                 imgs = data[0]["img"]
                 ids = data[0]["img_id"].cpu().numpy().flatten()
                 if config["dtype"] != "fp32":
@@ -145,7 +165,7 @@ def run_dali(config) -> ResultWriterDali:
     else:
         # DALI Tensor
         pipeline.schedule_run()
-        for i in tqdm(range(dataset.n_batch)):
+        for _ in tqdm(range(dataset.n_batch)):
             pipe_out = pipeline.share_outputs()
             if dataset.n_iter == 0:
                 pipeline.schedule_run()
@@ -194,7 +214,7 @@ if __name__ == "__main__":
 
     config["Dataset"]["data_root"] = opt.data_dir
 
-    ## PATH CONFIG
+    # PATH CONFIG
     config["path"] = os.path.join(os.getcwd(), config["path"])
 
     if config["dataloader"] == "torch":

@@ -1,6 +1,12 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import argparse
 import json
 import os
+from typing import List, Tuple, Union
 
 import pandas as pd
 
@@ -10,12 +16,17 @@ BASE_INF = 4690
 BASE_AP = 0.29205789973041
 
 
-def compute_final_score(num_params, inference_time):
+def compute_final_score(
+    num_params: Union[int, float], inference_time: Union[int, float]
+) -> float:
+    """Compute final score."""
     return num_params / BASE_NP + inference_time / BASE_INF
 
 
-def voc_ap(rec, prec):
-
+def voc_ap(
+    rec: List[Union[int, float]], prec: List[Union[int, float]]
+) -> Tuple[float, list, list]:
+    """Compute AP (VOC Dataset)."""
     rec.insert(0, 0.0)
     rec.append(1.0)
     mrec = rec[:]
@@ -37,8 +48,8 @@ def voc_ap(rec, prec):
     return ap, mrec, mpre
 
 
-def compute_AP(tp, fp, gt_len):
-
+def compute_AP(tp: list, fp: list, gt_len: int) -> float:
+    """Compute average precision."""
     cumsum = 0
     for idx, val in enumerate(fp):
         fp[idx] += cumsum
@@ -48,18 +59,18 @@ def compute_AP(tp, fp, gt_len):
         tp[idx] += cumsum
         cumsum += val
     rec = tp[:]
-    for idx, val in enumerate(tp):
+    for idx, _val in enumerate(tp):
         rec[idx] = float(tp[idx]) / gt_len
     prec = tp[:]
-    for idx, val in enumerate(tp):
+    for idx, _val in enumerate(tp):
         prec[idx] = float(tp[idx]) / (fp[idx] + tp[idx])
     ap, mrec, mprec = voc_ap(rec[:], prec[:])
 
     return ap
 
 
-def cal_IoU(ground_truth_data, dr_data):
-
+def cal_IoU(ground_truth_data: list, dr_data: list) -> Tuple[list, list]:
+    """Calculate intersection of union."""
     if len(ground_truth_data) == 0:
         if len(dr_data) == 0:
             return [], []
@@ -113,15 +124,15 @@ def cal_IoU(ground_truth_data, dr_data):
     return tp, fp
 
 
-def get_image_annotation(image_fn):
-
+def get_image_annotation(image_fn: str) -> List[list]:
+    """Get image annotation."""
     image_id = image_fn.strip(".jpg")
     video_id = image_fn[:14]
     video_dir = os.path.join(params["data_dir"], "test", video_id)
 
     with open(os.path.join(video_dir, image_id + ".json")) as json_file:
         data = json.load(json_file)
-        image_name = data["file_name"]
+        # image_name = data["file_name"]
         bboxes = data["object"]
 
         truth = []
@@ -134,7 +145,8 @@ def get_image_annotation(image_fn):
     return truth
 
 
-def get_video_annotation(video_dir):
+def get_video_annotation(video_dir: str) -> dict:
+    """Get video annotation."""
     video_id = video_dir.rsplit("/", 1)[-1]
     with open(os.path.join(video_dir, video_id + ".json")) as json_file:
         annot = json.load(json_file)
@@ -152,7 +164,8 @@ def get_video_annotation(video_dir):
 #     image_id = image_id[2:-4]
 
 
-def get_image_annotation_local(img_fn: str, data_root: str):
+def get_image_annotation_local(img_fn: str, data_root: str) -> list:
+    """Get local image annotations."""
     video_dir, image_id = img_fn.rsplit("/", 1)[-1].rsplit("_", 1)
     image_id = image_id[:-4]  # '00000.jpg' > '00000'
     video_annot = get_video_annotation(os.path.join(data_root, video_dir))
@@ -175,14 +188,14 @@ def get_image_annotation_local(img_fn: str, data_root: str):
 
 if __name__ == "__main__":
 
-    ap = argparse.ArgumentParser()
+    opt = argparse.ArgumentParser()
     # ap.add_argument('-p', '--project', type=str, default='iitp', help='project file that contains parameters')
     # ap.add_argument('--team_id', type=str, default='1425')
-    ap.add_argument("--prediction_file", type=str, help="prediction json file")
-    ap.add_argument("--data_root", type=str, help="Directory path for data")
-    ap.add_argument("--mock_test", action="store_true")
-    ap.add_argument("--wrong_ap", action="store_true")
-    args = ap.parse_args()
+    opt.add_argument("--prediction_file", type=str, help="prediction json file")
+    opt.add_argument("--data_root", type=str, help="Directory path for data")
+    opt.add_argument("--mock_test", action="store_true")
+    opt.add_argument("--wrong_ap", action="store_true")
+    args = opt.parse_args()
 
     # project_name = args.project
     # team_id = args.team_id
@@ -202,7 +215,7 @@ if __name__ == "__main__":
     param_num = float(json_data["param_num"])
     inference_time = float(json_data["inference_time"])
 
-    predictions = []
+    predictions: List[dict] = []
     for (
         img
     ) in (

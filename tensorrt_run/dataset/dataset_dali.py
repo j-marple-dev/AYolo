@@ -3,6 +3,12 @@
 - Author: Jongkuk Lim
 - Contact: limjk@jmarple.ai
 """
+from typing import Tuple, Union
+
+import numpy as np
+
+from tensorrt_run.dataset.dataset import DatasetBase
+from utils.general import scale_coords
 
 DATA_BACKEND_CHOICES = ["pytorch"]
 
@@ -10,7 +16,8 @@ try:
     import nvidia.dali.ops as ops
     import nvidia.dali.types as types
     from nvidia.dali.pipeline import Pipeline
-    from nvidia.dali.plugin.pytorch import DALIGenericIterator, feed_ndarray
+
+    # from nvidia.dali.plugin.pytorch import DALIGenericIterator, feed_ndarray
 
     DATA_BACKEND_CHOICES.append("dali-gpu")
     DATA_BACKEND_CHOICES.append("dali-cpu")
@@ -19,42 +26,24 @@ except ImportError:
         "Please install DALI from https://www.github.com/NVIDIA/DALI to run this example."
     )
 
-import numpy as np
-
-from tensorrt_run.dataset.dataset import DatasetBase
-from utils.general import scale_coords
-
-
-def create_dali_dataloader(config):
-    dataset = DatasetDALI(**config["Dataset"])
-    pipeline = DaliDataloaderPipeline(
-        dataset=dataset,
-        batch_size=config["Dataset"]["batch_size"],
-        num_threads=config["workers"],
-        img_size=config["Dataset"]["img_size"],
-        device_id=int(config["device"]),
-        rect=config["Dataset"]["rect"],
-        pad=config["Dataset"]["pad"],
-        stride=config["Dataset"]["stride"],
-        original_shape=config["Dataset"]["original_shape"],
-    )
-    pipeline.build()
-
-    return pipeline, dataset
-
 
 class DatasetDALI(DatasetBase):
-    def __init__(self, *args, **kwargs):
+    """DatasetDALI class."""
+
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        """Initialize DatasetDALI class."""
         super(DatasetDALI, self).__init__(*args, **kwargs)
         self.n_iter = 0
 
-    def __iter__(self):
+    def __iter__(self) -> object:
+        """Get iter."""
         self.i = 0
         self.n = len(self)
 
         return self
 
-    def __next__(self):
+    def __next__(self) -> tuple:
+        """Get next item."""
         images, index = [], []
         if self.n_iter > 0:
             # return [np.empty(0,)] * self.batch_size, [np.empty(0, )] * self.batch_size
@@ -73,19 +62,22 @@ class DatasetDALI(DatasetBase):
 
 
 class DaliDataloaderPipeline(Pipeline):
+    """Dali dataloader pipeline class."""
+
     def __init__(
         self,
-        dataset,
-        batch_size,
-        num_threads,
-        img_size,
-        device_id=0,
-        rect=True,
-        pad=0.5,
-        stride=32,
-        original_shape=(1080, 1920),
-        prefetch_queue_depth=4,
-    ):
+        dataset: DatasetBase,
+        batch_size: int,
+        num_threads: int,
+        img_size: int,
+        device_id: int = 0,
+        rect: bool = True,
+        pad: float = 0.5,
+        stride: int = 32,
+        original_shape: Tuple[int, int] = (1080, 1920),
+        prefetch_queue_depth: int = 4,
+    ) -> None:
+        """Initialize DaliDataloaderPipeline class."""
         super(DaliDataloaderPipeline, self).__init__(
             batch_size,
             num_threads,
@@ -119,18 +111,21 @@ class DaliDataloaderPipeline(Pipeline):
         self.nchw = ops.Transpose(device="gpu", perm=(2, 0, 1), transpose_layout=False)
         self.norm = ops.Normalize(device="gpu", mean=0.0, stddev=255.0)
 
-    def __init_shape_and_ratio(self, rect=True, pad=0.5, stride=32):
+    def __init_shape_and_ratio(
+        self, rect: bool = True, pad: float = 0.5, stride: int = 32
+    ) -> Tuple[Tuple[int, int], Union[np.ndarray, tuple], float, Tuple[float, float]]:
         h0, w0 = self.original_shape
         r = self.img_size / max(h0, w0)
         h, w = int(h0 * r), int(w0 * r)
-
+        new_shape: Union[np.ndarray, tuple]
         if rect:
-            new_shape = np.ceil(np.array((h, w)) / stride + pad).astype(np.int) * stride
+            new_shape = np.ceil(np.array((h, w)) / stride + pad).astype(int) * stride
         else:
             new_shape = (max(h, w),) * 2
 
         r = min(new_shape[0] / h, new_shape[1] / w, 1.0)
-        ratio = r, r  # width, height ratios
+        # width, height ratios
+        # ratio = r, r  # width, height ratios
         new_unpad = int(round(w * r)), int(round(h * r))
         dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
         # dw, dh = np.mod(dw, 64), np.mod(dh, 64)  # wh padding
@@ -142,7 +137,8 @@ class DaliDataloaderPipeline(Pipeline):
 
         return new_unpad, new_shape, resize_ratio, (dh / 2, dw / 2)
 
-    def scale_coords(self, img_shape, bboxes):
+    def scale_coords(self, img_shape: tuple, bboxes: np.ndarray) -> Union[tuple, list]:
+        """Get scale coords."""
         ratio_pad = (
             (
                 self.new_unpad[0] / self.original_shape[1],
@@ -153,7 +149,8 @@ class DaliDataloaderPipeline(Pipeline):
 
         return scale_coords(img_shape, bboxes, self.original_shape, ratio_pad=ratio_pad)
 
-    def define_graph(self):
+    def define_graph(self) -> tuple:
+        """Define data flow graph."""
         images, indexes = self.input()
         images = self.decode(images)
         images = self.resize(images)
@@ -164,5 +161,25 @@ class DaliDataloaderPipeline(Pipeline):
         return (images, indexes.gpu())
 
     @property
-    def size(self):
+    def size(self) -> int:
+        """Return length of dataset."""
         return len(self.dataset.img_files)
+
+
+def create_dali_dataloader(config: dict) -> Tuple[DaliDataloaderPipeline, DatasetDALI]:
+    """Create dali dataloader."""
+    dataset = DatasetDALI(**config["Dataset"])
+    pipeline = DaliDataloaderPipeline(
+        dataset=dataset,
+        batch_size=config["Dataset"]["batch_size"],
+        num_threads=config["workers"],
+        img_size=config["Dataset"]["img_size"],
+        device_id=int(config["device"]),
+        rect=config["Dataset"]["rect"],
+        pad=config["Dataset"]["pad"],
+        stride=config["Dataset"]["stride"],
+        original_shape=config["Dataset"]["original_shape"],
+    )
+    pipeline.build()
+
+    return pipeline, dataset

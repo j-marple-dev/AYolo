@@ -5,7 +5,7 @@
 """
 
 import os
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 import yaml
@@ -14,7 +14,13 @@ import wandb
 from utils.torch_utils import select_device
 
 
-def download_from_wandb(wandb_run, wandb_path, local_path, force=False) -> str:
+def download_from_wandb(
+    wandb_run: wandb.apis.public.Run,
+    wandb_path: str,
+    local_path: str,
+    force: bool = False,
+) -> str:
+    """Download file from wandb."""
     download_path = os.path.join(local_path, *wandb_path.split("/"))
 
     if force or not os.path.isfile(download_path):
@@ -30,7 +36,7 @@ def load_model_from_wandb(
     download_root: str = "wandb/downloads",
     force_download: bool = False,
     verbose: int = 1,
-):
+) -> Tuple[torch.nn.Module, wandb.apis.public.Run]:
     """Load model from wandb run path.
 
     Args:
