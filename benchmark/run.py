@@ -39,7 +39,7 @@ def value_test(
 
     # Check imgsize
     dataloader_config["imgsz"] = check_img_size(
-        dataloader_config["imgsz"], s=t_model.stride.max()
+        dataloader_config["imgsz"], s=int(t_model.stride.max())
     )  # 32 for normal
 
     # create dataloader
@@ -101,7 +101,7 @@ def torch_test(torch_model: str, dataloader_config: dict, device: torch.device) 
 
     # Check imgsize
     dataloader_config["imgsz"] = check_img_size(
-        dataloader_config["imgsz"], s=model.stride.max()
+        dataloader_config["imgsz"], s=int(model.stride.max())
     )
 
     # create dataloader
