@@ -359,7 +359,7 @@ class NMS(nn.Module):
         """Initialize NMS layer."""
         super(NMS, self).__init__()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         """Feed forward."""
         return non_max_suppression(
             x[0], conf_thres=self.conf, iou_thres=self.iou, classes=self.classes

@@ -331,7 +331,8 @@ class Model(nn.Module):
         for m in self.model.modules():
             if type(m) is Conv and hasattr(m, "bn"):
                 m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
-                m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
+                # update conv
+                m.conv = fuse_conv_and_bn(m.conv, m.bn)  # type: ignore
                 delattr(m, "bn")  # remove batchnorm
                 m.forward = m.fuseforward  # type: ignore
         self.info()
