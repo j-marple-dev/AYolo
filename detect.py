@@ -145,7 +145,7 @@ def detect(save_img: bool = False) -> None:
                 for *xyxy, conf, cls in reversed(det):
                     if save_txt:  # Write to file
                         xywh = (
-                            (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
+                            (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)  # type: ignore
                             .view(-1)
                             .tolist()
                         )  # normalized xywh
