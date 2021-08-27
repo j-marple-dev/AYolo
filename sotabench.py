@@ -65,7 +65,9 @@ def test(
         # Load model
         model = attempt_load(weights, map_location=device)  # load FP32 model
         if model.stride is not None:
-            imgs = check_img_size(imgsz, s=torch.max(model.stride))  # check img_size
+            imgs = check_img_size(
+                imgsz, s=int(torch.max(model.stride))
+            )  # check img_size
         else:
             imgs = imgsz
 
@@ -135,7 +137,8 @@ def test(
         0.0,
     )
     loss = torch.zeros(3, device=device)
-    jdict, stats = [], []  # noqa: F841
+    jdict: list = []
+    stats: list = []
     evaluator = COCOEvaluator(root=DATA_ROOT, model_name=opt.weights.replace(".pt", ""))
     for _batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
@@ -148,9 +151,9 @@ def test(
         # Disable gradients
         with torch.no_grad():
             # Run model
-            t = time_synchronized()
+            t_s = time_synchronized()
             model_out = model(img, augment=augment)  # inference and training outputs
-            t0 += time_synchronized() - t
+            t0 += time_synchronized() - t_s
             inf_out = model_out[0]
 
             # Compute loss
@@ -161,11 +164,11 @@ def test(
                 ]  # box, obj, cls
 
             # Run NMS
-            t = time_synchronized()
+            t_s = time_synchronized()
             output = non_max_suppression(
                 inf_out, conf_thres=conf_thres, iou_thres=iou_thres, merge=merge
             )
-            t1 += time_synchronized() - t
+            t1 += time_synchronized() - t_s
 
         # Statistics per image
         for si, pred in enumerate(output):
@@ -192,12 +195,12 @@ def test(
                     [1, 0, 1, 0]
                 ]  # normalization gain whwh
                 x = pred.clone()
-                x[:, :4] = scale_coords(
+                x[:, :4] = scale_coords(  # type: ignore
                     img[si].shape[1:], x[:, :4], shapes[si][0], shapes[si][1]
                 )  # to original
                 for *xyxy, conf, cls in x:  # noqa: B007
                     xywh = (
-                        (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
+                        (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)  # type: ignore
                         .view(-1)
                         .tolist()
                     )  # normalized xywh
@@ -215,9 +218,9 @@ def test(
                 scale_coords(
                     img[si].shape[1:], box, shapes[si][0], shapes[si][1]
                 )  # to original shape
-                box = xyxy2xywh(box)  # xywh
-                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                for p, b in zip(pred.tolist(), box.tolist()):
+                box_out = xyxy2xywh(box)  # xywh
+                box_out[:, :2] -= box_out[:, 2:] / 2  # xy center to top-left corner
+                for p, b in zip(pred.tolist(), box_out.tolist()):
                     result = {
                         "image_id": int(image_id) if image_id.isnumeric() else image_id,
                         "category_id": coco91class[int(p[5])],  # type: ignore
