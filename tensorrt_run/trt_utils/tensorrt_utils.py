@@ -17,7 +17,7 @@ import tensorrt as trt
 import torch
 
 
-def convert_to_torchout(pred: torch.Tensor) -> list:
+def convert_to_torchout(pred: Union[torch.Tensor, List[torch.Tensor]]) -> list:
     """Convert torch output to list."""
     output = [None] * pred[0].shape[0]
     num_obj = pred[1]

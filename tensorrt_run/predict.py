@@ -108,7 +108,7 @@ def run_torchdl(config: dict) -> ResultWriterBase:
             if config["dtype"] != "fp32":
                 imgs = imgs.half()
             inf_out = model(imgs)[0]
-            output = non_max_suppression(
+            output: List[torch.Tensor] = non_max_suppression(
                 prediction=inf_out,
                 conf_thres=config["conf_thres"],
                 iou_thres=config["iou_thres"],
@@ -153,7 +153,7 @@ def run_dali(config: dict) -> ResultWriterDali:
                     imgs = imgs.half()
                 inf_out = model(imgs)[0]
 
-                output = non_max_suppression(
+                output: List[torch.Tensor] = non_max_suppression(
                     prediction=inf_out,
                     conf_thres=config["conf_thres"],
                     iou_thres=config["iou_thres"],

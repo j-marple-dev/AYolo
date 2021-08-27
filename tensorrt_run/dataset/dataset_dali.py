@@ -3,9 +3,10 @@
 - Author: Jongkuk Lim
 - Contact: limjk@jmarple.ai
 """
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 import numpy as np
+import torch
 
 from tensorrt_run.dataset.dataset import DatasetBase
 from utils.general import scale_coords
@@ -137,7 +138,11 @@ class DaliDataloaderPipeline(Pipeline):
 
         return new_unpad, new_shape, resize_ratio, (dh / 2, dw / 2)
 
-    def scale_coords(self, img_shape: tuple, bboxes: np.ndarray) -> Union[tuple, list]:
+    def scale_coords(
+        self,
+        img_shape: Union[List[int], Tuple[int, int], torch.Size],
+        bboxes: Union[np.ndarray, torch.Tensor],
+    ) -> Union[np.ndarray, torch.Tensor]:
         """Get scale coords."""
         ratio_pad = (
             (

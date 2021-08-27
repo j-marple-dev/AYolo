@@ -6,7 +6,7 @@
 import abc
 import json
 from queue import Empty
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -200,7 +200,7 @@ class ResultWriterTorch(ResultWriterBase):
         """Initialize ResultWriterTorch class."""
         super(ResultWriterTorch, self).__init__(*args, **kwargs)
 
-    def scale_coords(self, img_shape: tuple, bboxes: np.ndarray, ratio_pad: Optional[Union[torch.Tensor, np.ndarray, list, tuple]]) -> Optional[Any]:  # type: ignore
+    def scale_coords(self, img_shape: Union[List[int], Tuple[int, int], torch.Size], bboxes: Union[np.ndarray, torch.Tensor], ratio_pad: Optional[Union[torch.Tensor, np.ndarray, list, tuple]]) -> Union[np.ndarray, torch.Tensor]:  # type: ignore
         """Scale coordinates."""
         if bboxes is None:
             return None
@@ -218,7 +218,7 @@ class ResultWriterDali(ResultWriterBase):
         super(ResultWriterDali, self).__init__(*args, **kwargs)
         self.dali_pipeline = dali_pipeline
 
-    def scale_coords(self, img_shape: tuple, bboxes: np.ndarray) -> Optional[Any]:  # type: ignore
+    def scale_coords(self, img_shape: Union[List[int], Tuple[int, int], torch.Size], bboxes: Union[torch.Tensor, np.ndarray]) -> Union[np.ndarray, torch.Tensor]:  # type: ignore
         """Scale coordinates."""
         if bboxes is None:
             return None
