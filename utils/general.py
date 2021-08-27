@@ -1,3 +1,8 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import glob
 import logging
 import math
@@ -11,6 +16,12 @@ import time
 from contextlib import contextmanager
 from copy import copy
 from pathlib import Path
+from typing import (TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple,
+                    Union)
+
+if TYPE_CHECKING:
+    from models.yolo import Model
+    from utils.datasets import LoadImagesAndLabels
 
 import cv2
 import matplotlib
@@ -26,7 +37,7 @@ from tqdm import tqdm
 
 import wandb
 from utils.google_utils import gsutil_getsize
-from utils.torch_utils import init_torch_seeds, is_parallel
+from utils.torch_utils import init_torch_seeds
 
 # Set printoptions
 torch.set_printoptions(linewidth=320, precision=5, profile="long")
@@ -39,10 +50,13 @@ matplotlib.rc("font", **{"size": 11})
 cv2.setNumThreads(0)
 
 
-@contextmanager
-def torch_distributed_zero_first(local_rank: int):
-    """Decorator to make all processes in distributed training wait for each
-    local_master to do something."""
+@contextmanager  # type: ignore
+def torch_distributed_zero_first(local_rank: int) -> Generator:
+    """Make all processes in distributed training.
+
+    Decorator to make all processes in distributed training wait for each local_master
+    to do something.
+    """
     if local_rank not in [-1, 0]:
         torch.distributed.barrier()
     yield
@@ -50,20 +64,22 @@ def torch_distributed_zero_first(local_rank: int):
         torch.distributed.barrier()
 
 
-def set_logging(rank=-1):
+def set_logging(rank: int = -1) -> None:
+    """Set logging."""
     logging.basicConfig(
         format="%(message)s", level=logging.INFO if rank in [-1, 0] else logging.WARN
     )
 
 
-def set_logging_detail(rank=-1):
+def set_logging_detail(rank: int = -1) -> None:
+    """Set logging with details."""
     logging.basicConfig(
         format="[%(levelname)s][%(name)s][%(asctime)-15s] %(message)s",
         level=logging.INFO if rank in [-1, 0] else logging.WARN,
     )
 
 
-def init_seeds(seed=0):
+def init_seeds(seed: int = 0) -> None:
     """Set random seed.
 
     Set random seed for `random, np.random, torch`.
@@ -73,24 +89,25 @@ def init_seeds(seed=0):
     init_torch_seeds(seed)
 
 
-def get_latest_run(search_dir="./runs"):
-    # Return path to most recent 'last.pt' in /runs (i.e. to --resume from)
+def get_latest_run(search_dir: str = "./runs") -> Union[int, str]:
+    """Return path to most recent 'last.pt' in directory."""
     last_list = glob.glob(f"{search_dir}/**/last*.pt", recursive=True)
     return max(last_list, key=os.path.getctime) if last_list else ""
 
 
-def check_git_status():
+def check_git_status() -> None:
+    """Check git status."""
     # Suggest 'git pull' if repo is out of date
     if platform.system() in ["Linux", "Darwin"] and not os.path.isfile("/.dockerenv"):
         s = subprocess.check_output(
             "if [ -d .git ]; then git fetch && git status -uno; fi", shell=True
         ).decode("utf-8")
         if "Your branch is behind" in s:
-            print(s[s.find("Your branch is behind") : s.find("\n\n")] + "\n")
+            print(s[s.find("Your branch is behind"):s.find("\n\n")] + "\n")
 
 
-def check_img_size(img_size, s=32):
-    # Verify img_size is a multiple of stride s
+def check_img_size(img_size: int, s: int = 32) -> int:
+    """Verify image size is a multiple of stride s."""
     new_size = make_divisible(img_size, int(s))  # ceil gs-multiple
     if new_size != img_size:
         print(
@@ -100,19 +117,23 @@ def check_img_size(img_size, s=32):
     return new_size
 
 
-def check_anchors(dataset, model, thr=4.0, imgsz=640):
-    # Check anchor fit to data, recompute if necessary
+def check_anchors(
+    dataset: "LoadImagesAndLabels",
+    model: "Model",
+    thr: float = 4.0,
+    imgsz: int = 640,
+) -> None:
+    """Check anchor fit to data, recompute if necessary."""
     print("\nAnalyzing anchors... ", end="")
-    m = (
-        model.module.model[-1] if hasattr(model, "module") else model.model[-1]
-    )  # Detect()
+    m: nn.Module = model.model[-1]  # Detect()
     shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     scale = np.random.uniform(0.9, 1.1, size=(shapes.shape[0], 1))  # augment scale
     wh = torch.tensor(
         np.concatenate([l[:, 3:5] * s for s, l in zip(shapes * scale, dataset.labels)])
     ).float()  # wh
 
-    def metric(k):  # compute metric
+    def metric(k: Union[torch.Tensor, np.ndarray]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute metric."""
         r = wh[:, None] / k[None]
         x = torch.min(r, 1.0 / r).min(2)[0]  # ratio metric
         best = x.max(1)[0]  # best_x
@@ -120,26 +141,27 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640):
         bpr = (best > 1.0 / thr).float().mean()  # best possible recall
         return bpr, aat
 
-    bpr, aat = metric(m.anchor_grid.clone().cpu().view(-1, 2))
+    bpr, aat = metric(m.anchor_grid.clone().cpu().view(-1, 2))  # type: ignore
     print(
         "anchors/target = %.2f, Best Possible Recall (BPR) = %.4f" % (aat, bpr), end=""
     )
     if bpr < 0.98:  # threshold to recompute
-        print(". Attempting to generate improved anchors, please wait..." % bpr)
-        na = m.anchor_grid.numel() // 2  # number of anchors
-        new_anchors = kmean_anchors(
+        print(". Attempting to generate improved anchors, please wait...")
+        # number of anchors
+        na = m.anchor_grid.numel() // 2  # type: ignore
+        new_anchors: Union[torch.Tensor, np.ndarray] = kmean_anchors(
             dataset, n=na, img_size=imgsz, thr=thr, gen=1000, verbose=False
         )
         new_bpr = metric(new_anchors.reshape(-1, 2))[0]
         if new_bpr > bpr:  # replace anchors
-            new_anchors = torch.tensor(new_anchors, device=m.anchors.device).type_as(
-                m.anchors
+            new_anchors = torch.tensor(new_anchors, device=m.anchors.device).type_as(  # type: ignore
+                m.anchors  # type: ignore
             )
-            m.anchor_grid[:] = new_anchors.clone().view_as(
-                m.anchor_grid
+            m.anchor_grid[:] = new_anchors.clone().view_as(  # type: ignore
+                m.anchor_grid  # type: ignore
             )  # for inference
-            m.anchors[:] = new_anchors.clone().view_as(m.anchors) / m.stride.to(
-                m.anchors.device
+            m.anchors[:] = new_anchors.clone().view_as(m.anchors) / m.stride.to(  # type: ignore
+                m.anchors.device  # type: ignore
             ).view(
                 -1, 1, 1
             )  # loss
@@ -155,18 +177,21 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640):
     print("")  # newline
 
 
-def check_anchor_order(m):
-    # Check anchor order against stride order for YOLOv5 Detect() module m, and correct if necessary
-    a = m.anchor_grid.prod(-1).view(-1)  # anchor area
-    da = a[-1] - a[0]  # delta a
-    ds = m.stride[-1] - m.stride[0]  # delta s
+def check_anchor_order(m: nn.Module) -> None:
+    """Check anchor order against stride order for YOLOv5 Detect module."""
+    # anchor area
+    a = m.anchor_grid.prod(-1).view(-1)  # type: ignore
+    # delta a
+    da = a[-1] - a[0]  # type: ignore
+    # delta s
+    ds = m.stride[-1] - m.stride[0]  # type: ignore
     if da.sign() != ds.sign():  # same order
         print("Reversing anchor order")
-        m.anchors[:] = m.anchors.flip(0)
-        m.anchor_grid[:] = m.anchor_grid.flip(0)
+        m.anchors[:] = m.anchors.flip(0)  # type: ignore
+        m.anchor_grid[:] = m.anchor_grid.flip(0)  # type: ignore
 
 
-def check_file(file):
+def check_file(file: str) -> str:
     """Search for file if not found."""
     if os.path.isfile(file) or file == "":
         return file
@@ -180,8 +205,8 @@ def check_file(file):
         return files[0]  # return file
 
 
-def check_dataset(dict):
-    # Download dataset if not found
+def check_dataset(dict: dict) -> None:
+    """Download dataset if not found."""
     val, s = dict.get("val"), dict.get("download")
     if val and len(val):
         val = [
@@ -204,8 +229,8 @@ def check_dataset(dict):
                 raise Exception("Dataset not found.")
 
 
-def make_divisible(x, divisor, minimum_check_number=0):
-    """Returns `x` evenly divisble by `divisor`.
+def make_divisible(x: int, divisor: int, minimum_check_number: int = 0) -> int:
+    """Return `x` evenly divisble by `divisor`.
 
     Returns
         ceil(x / divisor) * divisor
@@ -216,13 +241,15 @@ def make_divisible(x, divisor, minimum_check_number=0):
         return math.ceil(x / divisor) * divisor
 
 
-def labels_to_class_weights(labels, nc=80):
-    # Get class weights (inverse frequency) from training labels
+def labels_to_class_weights(
+    labels: Union[list, np.ndarray, torch.Tensor], nc: int = 80
+) -> torch.Tensor:
+    """Get class weights from training labels."""
     if labels[0] is None:  # no labels loaded
         return torch.Tensor()
 
-    labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
-    classes = labels[:, 0].astype(np.int)  # labels = [class xywh]
+    c_labels = np.concatenate(labels, 0)  # labels.shape = (866643, 5) for COCO
+    classes = c_labels[:, 0].astype(int)  # labels = [class xywh]
     weights = np.bincount(classes, minlength=nc)  # occurences per class
 
     # Prepend gridpoint count (for uCE trianing)
@@ -235,18 +262,29 @@ def labels_to_class_weights(labels, nc=80):
     return torch.from_numpy(weights)
 
 
-def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
-    # Produces image weights based on class mAPs
+def labels_to_image_weights(
+    labels: Union[list, np.ndarray],
+    nc: int = 80,
+    class_weights: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Produce image weights based on class mAPs."""
+    if class_weights is None:
+        np_class_weights: np.ndarray = np.ones(80)
+    else:
+        np_class_weights = class_weights
+
     n = len(labels)
     class_counts = np.array(
-        [np.bincount(labels[i][:, 0].astype(np.int), minlength=nc) for i in range(n)]
+        [np.bincount(labels[i][:, 0].astype(int), minlength=nc) for i in range(n)]
     )
-    image_weights = (class_weights.reshape(1, nc) * class_counts).sum(1)
+    image_weights = (np_class_weights.reshape(1, nc) * class_counts).sum(1)
     # index = random.choices(range(n), weights=image_weights, k=1)  # weight image sample
     return image_weights
 
 
-def coco80_to_coco91_class() -> list:  # converts 80-index (val2014) to 91-index (paper)
+def coco80_to_coco91_class() -> list:
+    """Convert coco80 index to coco 91 index."""
+    # converts 80-index (val2014) to 91-index (paper)
     # https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
     # a = np.loadtxt('data/coco.names', dtype='str', delimiter='\n')
     # b = np.loadtxt('data/coco_paper.names', dtype='str', delimiter='\n')
@@ -337,9 +375,12 @@ def coco80_to_coco91_class() -> list:  # converts 80-index (val2014) to 91-index
     return x
 
 
-def xyxy2xywh(x):
+def xyxy2xywh(x: Union[np.ndarray, torch.Tensor]) -> Union[torch.Tensor, np.ndarray]:
+    """Convert xyxy coords to xywh coords."""
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] where xy1=top-left, xy2=bottom-right
-    y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
+    y: Union[np.ndarray, torch.Tensor] = (
+        torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
+    )
     y[:, 0] = (x[:, 0] + x[:, 2]) / 2  # x center
     y[:, 1] = (x[:, 1] + x[:, 3]) / 2  # y center
     y[:, 2] = x[:, 2] - x[:, 0]  # width
@@ -347,9 +388,12 @@ def xyxy2xywh(x):
     return y
 
 
-def xywh2xyxy(x):
+def xywh2xyxy(x: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+    """Convert xywh coords to xyxy coords."""
     # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
-    y = torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
+    y: Union[np.ndarray, torch.Tensor] = (
+        torch.zeros_like(x) if isinstance(x, torch.Tensor) else np.zeros_like(x)
+    )
     y[:, 0] = x[:, 0] - x[:, 2] / 2  # top left x
     y[:, 1] = x[:, 1] - x[:, 3] / 2  # top left y
     y[:, 2] = x[:, 0] + x[:, 2] / 2  # bottom right x
@@ -357,8 +401,11 @@ def xywh2xyxy(x):
     return y
 
 
-def mask_large_box(bboxes: torch.Tensor, shape, min_size=32):
-    """
+def mask_large_box(
+    bboxes: torch.Tensor, shape: Union[list, tuple], min_size: int = 32
+) -> torch.Tensor:
+    """Mask large boxes.
+
     Args:
         bboxes: [bs, 2] of (w, h) of bboxes (normal coordinate)
         shape: [ [h0, w0],  [[h/h0, w/w0], [pad_h, pad_w]] ]
@@ -383,13 +430,20 @@ def mask_large_box(bboxes: torch.Tensor, shape, min_size=32):
     return mask_w * mask_h
 
 
-def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
-    # Rescale coords (xyxy) from img1_shape to img0_shape
+def scale_coords(
+    img1_shape: Union[List[int], Tuple[int, ...], torch.Size],
+    coords: Union[np.ndarray, torch.Tensor],
+    img0_shape: Union[List[int], Tuple[int, ...], torch.Size],
+    ratio_pad: Optional[Union[list, tuple, torch.Tensor, np.ndarray]] = None,
+) -> Union[np.ndarray, torch.Tensor]:
+    """Rescale coords from img1_shape to img0_shape."""
     if ratio_pad is None:  # calculate from img0_shape
-        gain = min(
+        gain: Union[float, torch.Tensor] = min(
             img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
         )  # gain  = old / new
-        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (
+        pad: Union[Tuple[float, float], torch.Tensor] = (
+            img1_shape[1] - img0_shape[1] * gain
+        ) / 2, (
             img1_shape[0] - img0_shape[0] * gain
         ) / 2  # wh padding
     else:
@@ -406,8 +460,11 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
     return coords
 
 
-def clip_coords(boxes, img_shape):
-    # Clip bounding xyxy bounding boxes to image shape (height, width)
+def clip_coords(
+    boxes: Union[torch.Tensor, np.ndarray],
+    img_shape: Union[List[int], Tuple[int, ...], torch.Size],
+) -> None:
+    """Clip bounding xyxy bounding boxes to image shape."""
     if isinstance(boxes, torch.Tensor):
         boxes[:, 0].clamp_(0, img_shape[1])  # x1
         boxes[:, 1].clamp_(0, img_shape[0])  # y1
@@ -421,16 +478,17 @@ def clip_coords(boxes, img_shape):
 
 
 def ap_per_class(
-    tp,
-    conf,
-    pred_cls,
-    target_cls,
-    plot=False,
-    fname="precision-recall_curve.png",
-    test_type="",
-    wlog=False,
-):
+    tp: np.ndarray,
+    conf: np.ndarray,
+    pred_cls: np.ndarray,
+    target_cls: np.ndarray,
+    plot: bool = False,
+    fname: str = "precision-recall_curve.png",
+    test_type: str = "",
+    wlog: bool = False,
+) -> tuple:
     """Compute the average precision, given the recall and precision curves.
+
     Source: https://github.com/rafaelpadilla/Object-Detection-Metrics.
     # Arguments
         tp:  True positives (nparray, nx1 or nx10).
@@ -493,10 +551,10 @@ def ap_per_class(
     f1 = 2 * p * r / (p + r + 1e-16)
 
     if plot:
-        py = np.stack(py, axis=1)
+        stack_py = np.stack(py, axis=1)
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        ax.plot(px, py, linewidth=0.5, color="grey")  # plot(recall, precision)
-        ax.plot(px, py.mean(1), linewidth=2, color="blue", label="all classes")
+        ax.plot(px, stack_py, linewidth=0.5, color="grey")  # plot(recall, precision)
+        ax.plot(px, stack_py.mean(1), linewidth=2, color="blue", label="all classes")
         ax.set_xlabel("Recall")
         ax.set_ylabel("Precision")
         ax.set_xlim(0, 1)
@@ -506,9 +564,8 @@ def ap_per_class(
         fig.savefig(fname, dpi=200)
 
         if wlog:
-            from PIL import Image
 
-            def fig2img(fig):
+            def fig2img(fig: plt.Figure) -> Image:
                 """Convert a Matplotlib figure to a PIL Image and return it."""
                 import io
 
@@ -526,8 +583,9 @@ def ap_per_class(
     return p, r, ap, f1, unique_classes.astype("int32")
 
 
-def compute_ap(recall, precision):
+def compute_ap(recall: list, precision: list) -> Union[np.ndarray, float]:
     """Compute the average precision, given the recall and precision curves.
+
     Source: https://github.com/rbgirshick/py-faster-rcnn.
     # Arguments
         recall:    The recall curve (list).
@@ -535,7 +593,6 @@ def compute_ap(recall, precision):
     # Returns
         The average precision as computed in py-faster-rcnn.
     """
-
     # Append sentinel values to beginning and end
     mrec = np.concatenate(([0.0], recall, [min(recall[-1] + 1e-3, 1.0)]))
     mpre = np.concatenate(([0.0], precision, [0.0]))
@@ -555,8 +612,19 @@ def compute_ap(recall, precision):
     return ap
 
 
-def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-9):
-    # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
+def bbox_iou(  # type: ignore
+    box1: torch.Tensor,
+    box2: torch.Tensor,
+    x1y1x2y2: bool = True,
+    GIoU: bool = False,
+    DIoU: bool = False,
+    CIoU: bool = False,
+    eps: float = 1e-9,
+) -> torch.Tensor:
+    """Return the IoU of box1 to box2.
+
+    box1 is 4, box2 is nx4.
+    """
     box2 = box2.T
 
     # Get the coordinates of bounding boxes
@@ -609,8 +677,7 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, eps=
         return iou  # IoU
 
 
-def box_iou(box1, box2):
-    # https://github.com/pytorch/vision/blob/master/torchvision/ops/boxes.py
+def box_iou(box1: torch.Tensor, box2: torch.Tensor) -> torch.Tensor:
     """Return intersection-over-union (Jaccard index) of boxes.
 
     Both sets of boxes are expected to be in (x1, y1, x2, y2) format.
@@ -622,7 +689,7 @@ def box_iou(box1, box2):
             IoU values for every element in boxes1 and boxes2
     """
 
-    def box_area(box):
+    def box_area(box: torch.Tensor) -> torch.Tensor:
         # box = 4xn
         return (box[2] - box[0]) * (box[3] - box[1])
 
@@ -643,7 +710,8 @@ def box_iou(box1, box2):
     )  # iou = inter / (area1 + area2 - inter)
 
 
-def wh_iou(wh1, wh2):
+def wh_iou(wh1: torch.Tensor, wh2: torch.Tensor) -> torch.Tensor:
+    """Return the nxm IoU matrix."""
     # Returns the nxm IoU matrix. wh1 is nx2, wh2 is mx2
     wh1 = wh1[:, None]  # [N,1,2]
     wh2 = wh2[None]  # [1,M,2]
@@ -654,16 +722,25 @@ def wh_iou(wh1, wh2):
 
 
 class FocalLoss(nn.Module):
-    # Wraps focal loss around existing loss_fcn(), i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
-    def __init__(self, loss_fcn, gamma=1.5, alpha=0.25):
+    """Wrap focal loss around existing loss_fcn().
+
+    i.e. criteria = FocalLoss(nn.BCEWithLogitsLoss(), gamma=1.5)
+    """
+
+    def __init__(
+        self, loss_fcn: nn.Module, gamma: float = 1.5, alpha: float = 0.25
+    ) -> None:
+        """Initialize FocalLoss class."""
         super(FocalLoss, self).__init__()
         self.loss_fcn = loss_fcn  # must be nn.BCEWithLogitsLoss()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = loss_fcn.reduction
-        self.loss_fcn.reduction = "none"  # required to apply FL to each element
+        # required to apply FL to each element
+        self.loss_fcn.reduction = "none"  # type: ignore
 
-    def forward(self, pred, true):
+    def forward(self, pred: torch.Tensor, true: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         loss = self.loss_fcn(pred, true)
         # p_t = torch.exp(-loss)
         # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
@@ -684,22 +761,29 @@ class FocalLoss(nn.Module):
 
 
 def smooth_BCE(
-    eps=0.1,
-):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
+    eps: float = 0.1,
+) -> Tuple[float, float]:
+    """Return positive, negative label smoothing BCE targets.
+
+    https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
+    """
     # return positive, negative label smoothing BCE targets
     return 1.0 - 0.5 * eps, 0.5 * eps
 
 
 class BCEBlurWithLogitsLoss(nn.Module):
-    # BCEwithLogitLoss() with reduced missing label effects.
-    def __init__(self, alpha=0.05):
+    """BCEwithLogitLoss() with reduced missing label effects."""
+
+    def __init__(self, alpha: float = 0.05) -> None:
+        """Initialize BCEBlurWithLogitsLoss class."""
         super(BCEBlurWithLogitsLoss, self).__init__()
         self.loss_fcn = nn.BCEWithLogitsLoss(
             reduction="none"
         )  # must be nn.BCEWithLogitsLoss()
         self.alpha = alpha
 
-    def forward(self, pred, true):
+    def forward(self, pred: torch.Tensor, true: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         loss = self.loss_fcn(pred, true)
         pred = torch.sigmoid(pred)  # prob from logits
         dx = pred - true  # reduce only missing label effects
@@ -709,7 +793,16 @@ class BCEBlurWithLogitsLoss(nn.Module):
         return loss.mean()
 
 
-def compute_loss(p, targets, model):  # predictions, targets, model
+def compute_loss(
+    p: Union[torch.Tensor, np.ndarray, list], targets: torch.Tensor, model: "Model"
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute loss.
+
+    Args:
+        p(torch tensor or ndarray): predictions.
+        targets(torch tensor): targets.
+        model(torch tensor): model.
+    """
     device = targets.device
     lcls, lbox, lobj = (
         torch.zeros(1, device=device),
@@ -720,8 +813,12 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     h = model.hyp  # hyperparameters
 
     # Define criteria
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([h["cls_pw"]])).to(device)
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([h["obj_pw"]])).to(device)
+    BCEcls: nn.Module = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([h["cls_pw"]])).to(
+        device
+    )
+    BCEobj: nn.Module = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([h["obj_pw"]])).to(
+        device
+    )
 
     # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
     cp, cn = smooth_BCE(eps=0.0)
@@ -789,10 +886,16 @@ def compute_loss(p, targets, model):  # predictions, targets, model
     return loss * bs, torch.cat((lbox, lobj, lcls, loss)).detach()
 
 
-def build_targets(p, targets, model):
+def build_targets(
+    p: Union[np.ndarray, torch.Tensor, List[Union[np.ndarray, torch.Tensor]]],
+    targets: torch.Tensor,
+    model: "Model",
+) -> Tuple[list, list, list, list]:
+    """Build targets for compute_loss()."""
     # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
     det = (
-        model.module.model[-1] if is_parallel(model) else model.model[-1]
+        # model.module.model[-1] if is_parallel(model) else model.model[-1]
+        model.model[-1]
     )  # Detect() module
     na, nt = det.na, targets.shape[0]  # number of anchors, targets
     tcls, tbox, indices, anch = [], [], [], []
@@ -843,7 +946,7 @@ def build_targets(p, targets, model):
             offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
         else:
             t = targets[0]
-            offsets = 0
+            offsets = torch.tensor(0)
 
         # Define
         b, c = t[:, :2].long().T  # image, class
@@ -863,15 +966,15 @@ def build_targets(p, targets, model):
 
 
 def non_max_suppression(
-    prediction,
-    conf_thres=0.1,
-    iou_thres=0.6,
-    merge=False,
-    classes=None,
-    agnostic=False,
-    trt=False,
-):
-    """Performs Non-Maximum Suppression (NMS) on inference results.
+    prediction: torch.Tensor,
+    conf_thres: float = 0.1,
+    iou_thres: float = 0.6,
+    merge: bool = False,
+    classes: Optional[Union[list, np.ndarray]] = None,
+    agnostic: bool = False,
+    trt: bool = False,
+) -> List[torch.Tensor]:
+    """Perform Non-Maximum Suppression (NMS) on inference results.
 
     Args:
         prediction (torch.Tensor): [bs, total_n_preds, 5 + n_cls]
@@ -884,14 +987,15 @@ def non_max_suppression(
     xc = prediction[..., 4] > conf_thres  # candidates
 
     # Settings
-    min_wh, max_wh = 2, 4096  # (pixels) minimum and maximum box width and height
+    # min_wh = 2
+    max_wh = 4096  # (pixels) minimum and maximum box width and height
     max_det = 300  # maximum number of detections per image
     time_limit = 10.0  # seconds to quit after
     redundant = True  # require redundant detections
     multi_label = nc > 1  # multiple labels per box (adds 0.5ms/img)
 
     t = time.time()
-    output = [None] * prediction.shape[0]
+    output: List[torch.Tensor] = [None] * prediction.shape[0]  # type: ignore
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
@@ -950,7 +1054,7 @@ def non_max_suppression(
                 )  # merged boxes
                 if redundant:
                     i = i[iou.sum(1) > 1]  # require redundancy
-            except:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
+            except Exception:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
                 print(x, i, x.shape, i.shape)
                 pass
 
@@ -961,10 +1065,8 @@ def non_max_suppression(
     return output
 
 
-def strip_optimizer(
-    f="weights/best.pt", s=""
-):  # from utils.general import *; strip_optimizer()
-    # Strip optimizer from 'f' to finalize training, optionally save as 's'
+def strip_optimizer(f: Union[str, Path] = "weights/best.pt", s: str = "") -> None:
+    """Strip optimizer from 'f' to finalize training, optionally save as 's'."""
     x = torch.load(f, map_location=torch.device("cpu"))
     x["optimizer"] = None
     x["training_results"] = None
@@ -980,7 +1082,8 @@ def strip_optimizer(
     )
 
 
-def coco_class_count(path="../coco/labels/train2014/"):
+def coco_class_count(path: str = "../coco/labels/train2014/") -> None:
+    """Count number of coco classes."""
     # Histogram of occurrences per class
     nc = 80  # number classes
     x = np.zeros(nc, dtype="int32")
@@ -992,21 +1095,21 @@ def coco_class_count(path="../coco/labels/train2014/"):
 
 
 def coco_only_people(
-    path="../coco/labels/train2017/",
-):  # from utils.general import *; coco_only_people()
-    # Find images with only people
+    path: str = "../coco/labels/train2017/",
+) -> None:
+    """Find images with only people."""
     files = sorted(glob.glob("%s/*.*" % path))
-    for i, file in enumerate(files):
+    for _, file in enumerate(files):
         labels = np.loadtxt(file, dtype=np.float32).reshape(-1, 5)
         if all(labels[:, 0] == 0):
             print(labels.shape[0], file)
 
 
-def crop_images_random(
-    path="../images/", scale=0.50
-):  # from utils.general import *; crop_images_random()
-    # crops images into random squares up to scale fraction
-    # WARNING: overwrites images!
+def crop_images_random(path: str = "../images/", scale: float = 0.50) -> None:
+    """Crop images into random squares up to scale fraction.
+
+    WARNING: ovewrites the images!
+    """
     for file in tqdm(sorted(glob.glob("%s/*.*" % path))):
         img = cv2.imread(file)  # BGR
         if img is not None:
@@ -1027,8 +1130,10 @@ def crop_images_random(
             cv2.imwrite(file, img[ymin:ymax, xmin:xmax])
 
 
-def coco_single_class_labels(path="../coco/labels/train2014/", label_class=43):
-    # Makes single-class coco datasets. from utils.general import *; coco_single_class_labels()
+def coco_single_class_labels(
+    path: str = "../coco/labels/train2014/", label_class: int = 43
+) -> None:
+    """Make single-class coco datasets."""
     if os.path.exists("new/"):
         shutil.rmtree("new/")  # delete output folder
     os.makedirs("new/")  # make new output folder
@@ -1046,17 +1151,22 @@ def coco_single_class_labels(path="../coco/labels/train2014/", label_class=43):
             with open("new/images.txt", "a") as f:  # add image to dataset list
                 f.write(img_file + "\n")
             with open("new/labels/" + Path(file).name, "a") as f:  # write label
-                for l in labels[i]:
-                    f.write("%g %.6f %.6f %.6f %.6f\n" % tuple(l))
+                for temp in labels[i]:
+                    f.write("%g %.6f %.6f %.6f %.6f\n" % tuple(temp))
             shutil.copyfile(
                 src=img_file, dst="new/images/" + Path(file).name.replace("txt", "jpg")
             )  # copy images
 
 
 def kmean_anchors(
-    path="./data/coco128.yaml", n=9, img_size=640, thr=4.0, gen=1000, verbose=True
-):
-    """Creates kmeans-evolved anchors from training dataset.
+    path: Union[str, "LoadImagesAndLabels"] = "./data/coco128.yaml",
+    n: int = 9,
+    img_size: int = 640,
+    thr: float = 4.0,
+    gen: int = 1000,
+    verbose: bool = True,
+) -> np.ndarray:
+    """Create kmeans-evolved anchors from training dataset.
 
     Arguments:
         path: path to dataset *.yaml, or a loaded dataset
@@ -1073,20 +1183,24 @@ def kmean_anchors(
     """
     thr = 1.0 / thr
 
-    def metric(k, wh):  # compute metrics
+    def metric(
+        k: Union[torch.Tensor, np.ndarray], wh: Union[torch.Tensor, np.ndarray]
+    ) -> Tuple[
+        Union[torch.Tensor, np.ndarray], Union[torch.Tensor, np.ndarray]
+    ]:  # compute metrics
         r = wh[:, None] / k[None]
         x = torch.min(r, 1.0 / r).min(2)[0]  # ratio metric
         # x = wh_iou(wh, torch.tensor(k))  # iou metric
         return x, x.max(1)[0]  # x, best_x
 
-    def fitness(k):  # mutation fitness
-        _, best = metric(torch.tensor(k, dtype=torch.float32), wh)
-        return (best * (best > thr).float()).mean()  # fitness
+    def fitness(k: np.ndarray) -> torch.Tensor:  # mutation fitness
+        _, best = metric(torch.tensor(k, dtype=torch.float32), wh)  # type: ignore
+        return (best * (best > thr).float()).mean()  # type: ignore  # fitness
 
-    def print_results(k):
+    def print_results(k: np.ndarray) -> np.ndarray:
         k = k[np.argsort(k.prod(1))]  # sort small to large
-        x, best = metric(k, wh0)
-        bpr, aat = (best > thr).float().mean(), (
+        x, best = metric(k, wh0)  # type: ignore
+        bpr, aat = (best > thr).float().mean(), (  # type: ignore
             x > thr
         ).float().mean() * n  # best possible recall, anch > thr
         print(
@@ -1095,12 +1209,12 @@ def kmean_anchors(
         )
         print(
             "n=%g, img_size=%s, metric_all=%.3f/%.3f-mean/best, past_thr=%.3f-mean: "
-            % (n, img_size, x.mean(), best.mean(), x[x > thr].mean()),
+            % (n, img_size, x.mean(), best.mean(), x[x > thr].mean()),  # type: ignore
             end="",
         )
         for i, x in enumerate(k):
             print(
-                "%i,%i" % (round(x[0]), round(x[1])),
+                "%i,%i" % (round(x[0]), round(x[1])),  # type: ignore
                 end=",  " if i < len(k) - 1 else "\n",
             )  # use in *.cfg
         return k
@@ -1151,7 +1265,7 @@ def kmean_anchors(
 
     # Evolve
     npr = np.random
-    f, sh, mp, s = (
+    f_, sh, mp, s = (
         fitness(k),
         k.shape,
         0.9,
@@ -1168,16 +1282,22 @@ def kmean_anchors(
             )
         kg = (k.copy() * v).clip(min=2.0)
         fg = fitness(kg)
-        if fg > f:
-            f, k = fg, kg.copy()
-            pbar.desc = "Evolving anchors with Genetic Algorithm: fitness = %.4f" % f
+        if fg > f_:
+            f_, k = fg, kg.copy()
+            pbar.desc = "Evolving anchors with Genetic Algorithm: fitness = %.4f" % f_
             if verbose:
                 print_results(k)
 
     return print_results(k)
 
 
-def print_mutation(hyp, results, yaml_file="hyp_evolved.yaml", bucket=""):
+def print_mutation(
+    hyp: dict,
+    results: tuple,
+    yaml_file: Union[str, Path] = "hyp_evolved.yaml",
+    bucket: str = "",
+) -> None:
+    """Print mutation results to evolve.txt."""
     # Print mutation results to evolve.txt (for use with train.py --evolve)
     a = "%10s" * len(hyp) % tuple(hyp.keys())  # hyperparam keys
     b = "%10.3g" * len(hyp) % tuple(hyp.values())  # hyperparam values
@@ -1221,7 +1341,13 @@ def print_mutation(hyp, results, yaml_file="hyp_evolved.yaml", bucket=""):
         os.system("gsutil cp evolve.txt %s gs://%s" % (yaml_file, bucket))  # upload
 
 
-def apply_classifier(x, model, img, im0):
+def apply_classifier(
+    x: Union[torch.Tensor, np.ndarray],
+    model: nn.Module,
+    img: Union[torch.Tensor, np.ndarray],
+    im0: Union[List[np.ndarray], np.ndarray, torch.Tensor],
+) -> Union[np.ndarray, torch.Tensor]:
+    """Apply a second stage classifier to yolo outputs."""
     # applies a second stage classifier to yolo outputs
     im0 = [im0] if isinstance(im0, np.ndarray) else im0
     for i, d in enumerate(x):  # per image
@@ -1232,7 +1358,12 @@ def apply_classifier(x, model, img, im0):
             b = xyxy2xywh(d[:, :4])  # boxes
             b[:, 2:] = b[:, 2:].max(1)[0].unsqueeze(1)  # rectangle to square
             b[:, 2:] = b[:, 2:] * 1.3 + 30  # pad
-            d[:, :4] = xywh2xyxy(b).long()
+            temp = xywh2xyxy(b)
+            if isinstance(temp, torch.Tensor):
+                d[:, :4] = temp.long()
+            elif isinstance(temp, np.ndarray):
+                d[:, :4] = temp.astype(int)
+            # d[:, :4] = xywh2xyxy(b).long()
 
             # Rescale boxes from img_size to im0 size
             scale_coords(img.shape[2:], d[:, :4], im0[i].shape)
@@ -1240,8 +1371,8 @@ def apply_classifier(x, model, img, im0):
             # Classes
             pred_cls1 = d[:, 5].long()
             ims = []
-            for j, a in enumerate(d):  # per item
-                cutout = im0[i][int(a[1]) : int(a[3]), int(a[0]) : int(a[2])]
+            for _, a in enumerate(d):  # per item
+                cutout = im0[i][int(a[1]):int(a[3]), int(a[0]):int(a[2])]
                 im = cv2.resize(cutout, (224, 224))  # BGR
                 # cv2.imwrite('test%i.jpg' % j, cutout)
 
@@ -1258,13 +1389,16 @@ def apply_classifier(x, model, img, im0):
     return x
 
 
-def fitness(x):
+def fitness(x: np.ndarray) -> np.ndarray:
+    """Return fitness."""
     # Returns fitness (for use with results.txt or evolve.txt)
     w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
     return (x[:, :4] * w).sum(1)
 
 
-def output_to_target(output, width, height):
+def output_to_target(
+    output: Union[torch.Tensor, np.ndarray], width: int, height: int
+) -> np.ndarray:
     """Convert model output to target format [batch_id, class_id, x, y, w, h, conf]."""
     targets = []
     for i, o in enumerate(output):
@@ -1285,7 +1419,7 @@ def output_to_target(output, width, height):
     return np.array(targets)
 
 
-def increment_dir(dir, comment=""):
+def increment_dir(dir: Union[str, Path], comment: str = "") -> str:
     """Increments a directory runs/exp1 --> runs/exp2_comment."""
     n = 0  # number
     dir = str(Path(dir))  # os-agnostic
@@ -1299,7 +1433,8 @@ def increment_dir(dir, comment=""):
 
 
 # Plotting functions ---------------------------------------------------------------------------------------------------
-def hist2d(x, y, n=100):
+def hist2d(x: np.ndarray, y: np.ndarray, n: int = 100) -> np.ndarray:
+    """Draw 2D histogram."""
     # 2d histogram used in labels.png and evolve.png
     xedges, yedges = np.linspace(x.min(), x.max(), n), np.linspace(y.min(), y.max(), n)
     hist, xedges, yedges = np.histogram2d(x, y, (xedges, yedges))
@@ -1308,9 +1443,12 @@ def hist2d(x, y, n=100):
     return np.log(hist[xidx, yidx])
 
 
-def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
+def butter_lowpass_filtfilt(
+    data: np.ndarray, cutoff: int = 1500, fs: int = 50000, order: int = 5
+) -> np.ndarray:
+    """Filter with lowpass filter."""
     # https://stackoverflow.com/questions/28536191/how-to-filter-smooth-with-scipy-numpy
-    def butter_lowpass(cutoff, fs, order):
+    def butter_lowpass(cutoff: int, fs: int, order: int) -> tuple:
         nyq = 0.5 * fs
         normal_cutoff = cutoff / nyq
         b, a = butter(order, normal_cutoff, btype="low", analog=False)
@@ -1320,8 +1458,14 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, img, color=None, label=None, line_thickness=None):
-    # Plots one bounding box on image img
+def plot_one_box(
+    x: np.ndarray,
+    img: np.ndarray,
+    color: Union[Tuple[int, int, int], List[int]] = None,
+    label: str = None,
+    line_thickness: float = None,
+) -> None:
+    """Plot one bounding box on image."""
     tl = (
         line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1
     )  # line/font thickness
@@ -1345,8 +1489,8 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=None):
         )
 
 
-def plot_wh_methods():  # from utils.general import *; plot_wh_methods()
-    # Compares the two methods for width-height anchor multiplication
+def plot_wh_methods() -> None:
+    """Compare the two methods for width-height anchor multiplication."""
     # https://github.com/ultralytics/yolov3/issues/168
     x = np.arange(-4.0, 4.0, 0.1)
     ya = np.exp(x)
@@ -1366,7 +1510,9 @@ def plot_wh_methods():  # from utils.general import *; plot_wh_methods()
     fig.savefig("comparison.png", dpi=200)
 
 
-def get_wlog_box_data(box_info, xywh=False, normal=False):
+def get_wlog_box_data(
+    box_info: np.ndarray, xywh: bool = False, normal: bool = False
+) -> List[Dict[str, Any]]:
     """Get bbox information with wandb bbox format.
 
     Args:
@@ -1377,7 +1523,7 @@ def get_wlog_box_data(box_info, xywh=False, normal=False):
     Returns:
         List[Dict[str, Any] : data of the bbox w/ Wandb format.
     """
-    box_data = []
+    box_data: List[dict] = []
     # If there is no bounding box, return an empty list.
     if len(box_info) == 0 or len(box_info[0]) not in [5, 7]:
         print(f"Wrong box info with len(row) = {len(box_info[0])}")
@@ -1386,7 +1532,7 @@ def get_wlog_box_data(box_info, xywh=False, normal=False):
     gt_label = True if len(box_info[0]) < 6 else False
 
     for row in box_info:
-        box_datum = {}
+        box_datum: Dict[str, Any] = {}
         if gt_label:
             cls_id, x1, y1, x2, y2 = row
             # Without the same `scores` keys, cannot show plot. Why??
@@ -1421,23 +1567,24 @@ def get_wlog_box_data(box_info, xywh=False, normal=False):
 class BBoxScore:
     """Class for collecting data for plotting BBox."""
 
-    def __init__(self, class_names):
+    def __init__(self, class_names: List[str]) -> None:
         """Initialize."""
         self.class_id_to_label = dict(enumerate(class_names))
-        self.fp2bboxes = (
+        self.fp2bboxes = (  # type: ignore
             {}
         )  # img_fp: {"Baseline": ndarray, "Test": ndarray: "gt_normal": ndarray}
-        self.fp2img_tsr = {}  # img_fp: torch.Tensor of shape [C, H, W]
-        self.test_types = set()
-        self.test_type = None  # "present" test_type
+        self.fp2img_tsr = {}  # type: ignore
+        # img_fp: torch.Tensor of shape [C, H, W]
+        self.test_types = set()  # type: ignore
+        self.test_type: Optional[str] = None  # "present" test_type
         self.criteria = ["large_conf_small_iou", "small_conf_large_iou"]
 
-    def _check_container(self):
+    def _check_container(self) -> None:
         self.test_types2idx = {
             test_type: idx for idx, test_type in enumerate(self.test_types)
         }
         eps = 1e-12
-        for fp, bboxes in self.fp2bboxes.items():
+        for fp, _bboxes in self.fp2bboxes.items():
             height, width = self.fp2img_tsr[fp].shape[-2:]
 
             for test_type, bbox_data in self.fp2bboxes[fp].items():
@@ -1455,7 +1602,7 @@ class BBoxScore:
 
     def get_filtered_fps(
         self, max_n_fps: int = 50, criterion: str = None, test_type: str = None
-    ):
+    ) -> list:
         """Get a list of filtered filepaths.
 
         Args:
@@ -1471,7 +1618,7 @@ class BBoxScore:
 
             fp2scores = {}  # fp: max(conf - iou), max(iou - conf)
             for fp, bboxes in self.fp2bboxes.items():
-                if not test_type in bboxes:
+                if test_type not in bboxes:
                     fp2scores[fp] = {k: -1 for k in self.criteria}
                     continue
                 bbox_data = bboxes[test_type]
@@ -1483,14 +1630,14 @@ class BBoxScore:
                 }
 
             unchoosed = sorted(
-                unchoosed, key=lambda fp: fp2scores[fp][criterion], reverse=True
+                unchoosed, key=lambda fp: fp2scores[fp][criterion], reverse=True  # type: ignore
             )
             return unchoosed[:max_n_fps]
 
         return np.random.choice(unchoosed, size=max_n_fps, replace=False).tolist()
 
-    def get_wlog_img(self, fp, shift_cls_id=False):
-        """get wandb image instance for bbox.
+    def get_wlog_img(self, fp: str, shift_cls_id: bool = False) -> wandb.Image:
+        """Get wandb image instance for bbox.
 
         Args:
             fp (str): image filepath
@@ -1532,14 +1679,15 @@ class BBoxScore:
 
 
 def plot_images(
-    images,
-    targets,
-    paths=None,
-    fname="images.jpg",
-    names=None,
-    max_size=640,
-    max_subplots=16,
-):
+    images: Union[torch.Tensor, np.ndarray],
+    targets: Union[torch.Tensor, np.ndarray],
+    paths: Optional[List[str]] = None,
+    fname: str = "images.jpg",
+    names: Optional[Union[tuple, list]] = None,
+    max_size: int = 640,
+    max_subplots: int = 16,
+) -> np.ndarray:
+    """Plot images."""
     tl = 3  # line thickness
     tf = max(tl - 1, 1)  # font thickness
 
@@ -1547,7 +1695,9 @@ def plot_images(
         images = images.cpu().float().numpy()
 
     if isinstance(targets, torch.Tensor):
-        targets = targets.cpu().numpy()
+        np_targets = targets.cpu().numpy()
+    else:
+        np_targets = targets
 
     # un-normalise
     if np.max(images[0]) <= 1:
@@ -1569,7 +1719,11 @@ def plot_images(
     # Fix class - colour map
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     # https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
-    hex2rgb = lambda h: tuple(int(h[1 + i : 1 + i + 2], 16) for i in (0, 2, 4))
+
+    def hex2rgb(h):  # noqa
+        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
+
+    # hex2rgb = lambda h: tuple(int(h[1 + i : 1 + i + 2], 16) for i in (0, 2, 4))
     color_lut = [hex2rgb(h) for h in prop_cycle.by_key()["color"]]
 
     for i, img in enumerate(images):
@@ -1583,13 +1737,13 @@ def plot_images(
         if scale_factor < 1:
             img = cv2.resize(img, (w, h))
 
-        mosaic[block_y : block_y + h, block_x : block_x + w, :] = img
-        if len(targets) > 0:
-            image_targets = targets[targets[:, 0] == i]
+        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
+        if len(np_targets) > 0:
+            image_targets = np_targets[np_targets[:, 0] == i]
             boxes = xywh2xyxy(image_targets[:, 2:6]).T
-            classes = image_targets[:, 1].astype("int")
+            classes = image_targets[:, 1].astype("int")  # type: ignore
             gt = image_targets.shape[1] == 6  # ground truth if no conf column
-            conf = (
+            conf: Optional[np.ndarray] = (
                 None if gt else image_targets[:, 6]
             )  # check for confidence presence (gt vs pred)
 
@@ -1601,8 +1755,9 @@ def plot_images(
                 cls = int(classes[j])
                 color = color_lut[cls % len(color_lut)]
                 cls = names[cls] if names else cls
-                if gt or conf[j] > 0.3:  # 0.3 conf thresh
-                    label = "%s" % cls if gt else "%s %.1f" % (cls, conf[j])
+                # 0.3 conf thresh
+                if gt or conf[j] > 0.3:  # type: ignore
+                    label = "%s" % cls if gt else "%s %.1f" % (cls, conf[j])  # type: ignore
                     plot_one_box(
                         box, mosaic, label=label, color=color, line_thickness=tl
                     )
@@ -1640,8 +1795,13 @@ def plot_images(
     return mosaic
 
 
-def plot_lr_scheduler(optimizer, scheduler, epochs=300, save_dir=""):
-    # Plot LR simulating training for full epochs
+def plot_lr_scheduler(
+    optimizer: torch.optim.Optimizer,
+    scheduler: Any,
+    epochs: int = 300,
+    save_dir: str = "",
+) -> None:
+    """Plot LR simulating training for full epochs."""
     optimizer, scheduler = copy(optimizer), copy(scheduler)  # do not modify originals
     y = []
     for _ in range(epochs):
@@ -1657,8 +1817,8 @@ def plot_lr_scheduler(optimizer, scheduler, epochs=300, save_dir=""):
     plt.savefig(Path(save_dir) / "LR.png", dpi=200)
 
 
-def plot_test_txt():  # from utils.general import *; plot_test()
-    # Plot test.txt histograms
+def plot_test_txt() -> None:  # from utils.general import *; plot_test()
+    """Plot test.txt histograms."""
     x = np.loadtxt("test.txt", dtype=np.float32)
     box = xyxy2xywh(x[:, :4])
     cx, cy = box[:, 0], box[:, 1]
@@ -1674,8 +1834,8 @@ def plot_test_txt():  # from utils.general import *; plot_test()
     plt.savefig("hist1d.png", dpi=200)
 
 
-def plot_targets_txt():  # from utils.general import *; plot_targets_txt()
-    # Plot targets.txt histograms
+def plot_targets_txt() -> None:  # from utils.general import *; plot_targets_txt()
+    """Plot targets.txt histograms."""
     x = np.loadtxt("targets.txt", dtype=np.float32).T
     s = ["x targets", "y targets", "width targets", "height targets"]
     fig, ax = plt.subplots(2, 2, figsize=(8, 8), tight_layout=True)
@@ -1688,16 +1848,17 @@ def plot_targets_txt():  # from utils.general import *; plot_targets_txt()
 
 
 def plot_study_txt(
-    f="study.txt", x=None
-):  # from utils.general import *; plot_study_txt()
+    f: str = "study.txt", x: Optional[list] = None
+) -> None:  # from utils.general import *; plot_study_txt()
+    """Plot study.txt generated by test.py."""
     # Plot study.txt generated by test.py
     fig, ax = plt.subplots(2, 4, figsize=(10, 6), tight_layout=True)
     ax = ax.ravel()
 
     fig2, ax2 = plt.subplots(1, 1, figsize=(8, 4), tight_layout=True)
-    for f in ["study/study_coco_yolov5%s.txt" % x for x in ["s", "m", "l", "x"]]:
+    for f in ["study/study_coco_yolov5%s.txt" % t for t in ["s", "m", "l", "x"]]:
         y = np.loadtxt(f, dtype=np.float32, usecols=[0, 1, 2, 3, 7, 8, 9], ndmin=2).T
-        x = np.arange(y.shape[1]) if x is None else np.array(x)
+        np_x = np.arange(y.shape[1]) if x is None else np.array(x)
         s = [
             "P",
             "R",
@@ -1708,7 +1869,7 @@ def plot_study_txt(
             "t_total (ms/img)",
         ]
         for i in range(7):
-            ax[i].plot(x, y[i], ".-", linewidth=2, markersize=8)
+            ax[i].plot(np_x, y[i], ".-", linewidth=2, markersize=8)
             ax[i].set_title(s[i])
 
         j = y[3].argmax() + 1
@@ -1742,8 +1903,8 @@ def plot_study_txt(
     plt.savefig(f.replace(".txt", ".png"), dpi=300)
 
 
-def plot_labels(labels, save_dir=""):
-    # plot dataset labels
+def plot_labels(labels: np.ndarray, save_dir: Union[str, Path] = "") -> None:
+    """Plot dataset labels."""
     c, b = labels[:, 0], labels[:, 1:].transpose()  # classes, boxes
     nc = int(c.max() + 1)  # number of classes
 
@@ -1777,30 +1938,30 @@ def plot_labels(labels, save_dir=""):
         )
         plt.savefig(Path(save_dir) / "labels_correlogram.png", dpi=200)
         plt.close()
-    except Exception as e:
+    except Exception:
         pass
 
 
 def plot_evolution(
-    yaml_file="data/hyp.finetune.yaml",
-):  # from utils.general import *; plot_evolution()
-    # Plot hyperparameter evolution results in evolve.txt
+    yaml_file: Union[str, Path] = "data/hyp.finetune.yaml",
+) -> None:  # from utils.general import *; plot_evolution()
+    """Plot hyperparameter evolution results in evolve.txt."""
     with open(yaml_file) as f:
         hyp = yaml.load(f, Loader=yaml.FullLoader)
     x = np.loadtxt("evolve.txt", ndmin=2)
-    f = fitness(x)
-    # weights = (f - f.min()) ** 2  # for weighted results
+    fit = fitness(x)
+    # weights = (fit - fit.min()) ** 2  # for weighted results
     plt.figure(figsize=(10, 12), tight_layout=True)
     matplotlib.rc("font", **{"size": 8})
-    for i, (k, v) in enumerate(hyp.items()):
+    for i, (k, _v) in enumerate(hyp.items()):
         y = x[:, i + 7]
         # mu = (y * weights).sum() / weights.sum()  # best weighted result
-        mu = y[f.argmax()]  # best single result
+        mu = y[fit.argmax()]  # best single result
         plt.subplot(6, 5, i + 1)
         plt.scatter(
-            y, f, c=hist2d(y, f, 20), cmap="viridis", alpha=0.8, edgecolors="none"
+            y, fit, c=hist2d(y, fit, 20), cmap="viridis", alpha=0.8, edgecolors="none"
         )
-        plt.plot(mu, f.max(), "k+", markersize=15)
+        plt.plot(mu, fit.max(), "k+", markersize=15)
         plt.title("%s = %.3g" % (k, mu), fontdict={"size": 9})  # limit to 40 characters
         if i % 5 != 0:
             plt.yticks([])
@@ -1810,9 +1971,9 @@ def plot_evolution(
 
 
 def plot_results_overlay(
-    start=0, stop=0
-):  # from utils.general import *; plot_results_overlay()
-    # Plot training 'results*.txt', overlaying train and val losses
+    start: int = 0, stop: int = 0
+) -> None:  # from utils.general import *; plot_results_overlay()
+    """Plot training 'results*.txt', overlaying train and val losses."""
     s = [
         "train",
         "train",
@@ -1847,7 +2008,18 @@ def plot_results_overlay(
         fig.savefig(f.replace(".txt", ".png"), dpi=200)
 
 
-def plot_results(start=0, stop=0, bucket="", id=(), labels=(), save_dir=""):
+def plot_results(
+    start: int = 0,
+    stop: int = 0,
+    bucket: str = "",
+    id: Union[tuple, list] = (),
+    labels: Union[tuple, list] = (),
+    save_dir: Union[str, Path] = "",
+) -> None:
+    """Plot training 'results*.txt'.
+
+    https://github.com/ultralytics/yolov5#reproduce-our-training.
+    """
     # from utils.general import *; plot_results()
     # Plot training 'results*.txt' as seen in https://github.com/ultralytics/yolov5#reproduce-our-training
     fig, ax = plt.subplots(2, 5, figsize=(12, 6))
@@ -1901,8 +2073,9 @@ def plot_results(start=0, stop=0, bucket="", id=(), labels=(), save_dir=""):
     fig.savefig(Path(save_dir) / "results.png", dpi=200)
 
 
-def remove_exts(path, exts=(".png", "jpg")):
-    for root, dirs, files in os.walk(path):
+def remove_exts(path: str, exts: Union[Tuple[str, ...], str] = (".png", "jpg")) -> None:
+    """Remove exts."""
+    for root, _dirs, files in os.walk(path):
         for currentFile in files:
             if currentFile.lower().endswith(exts):
                 os.remove(os.path.join(root, currentFile))
