@@ -111,7 +111,9 @@ class AbstractOptimizer(ABC):
         del pg0, pg1, pg2
 
         scheduler, lf = init_scheduler(optimizer, hyp, epochs)
-        start_epoch, best_fitness = 0, 0.0
+        # start_epoch, best_fitness = 0, 0.0
+        start_epoch = 0
+        best_fitness: Union[float, np.ndarray] = 0.0
 
         # Image sizes
         gs = int(max(model.stride))  # grid size (max stride)
@@ -303,6 +305,7 @@ class AbstractOptimizer(ABC):
                     best_fitness = fi
 
                 # Save model
+                # TODO(ulken94): fi and best_fitness have type problem.
                 if not opt.nosave or final_epoch:
                     train_loop_save_model(
                         ema.ema,
@@ -311,8 +314,8 @@ class AbstractOptimizer(ABC):
                         best_path,
                         results_file_path,
                         epoch,
-                        fi,
-                        best_fitness,
+                        fi,  # type: ignore
+                        best_fitness,  # type: ignore
                         final_epoch,
                     )
             # end epoch -----------------------------------------------------------------------------------------------

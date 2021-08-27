@@ -207,7 +207,7 @@ def train_loop_update_image_weight(
                 dataset.labels, nc=nc, class_weights=cw
             )  # image weights
             dataset.indices = random.choices(  # type: ignore
-                range(dataset.n), weights=iw, k=dataset.n
+                range(dataset.n), weights=iw, k=dataset.n  # type: ignore
             )  # rand weighted idx
         # Broadcast if DDP
         if rank != -1:
