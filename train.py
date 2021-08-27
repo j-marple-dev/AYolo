@@ -8,7 +8,7 @@ import shutil
 import test  # import test.py to get mAP after each epoch
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import torch.distributed as dist
@@ -182,7 +182,8 @@ def train(
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # Resume
-    start_epoch, best_fitness = 0, 0.0
+    start_epoch = 0
+    best_fitness: Union[float, np.ndarray] = 0.0
     if pretrained:
         # Optimizer
         if ckpt["optimizer"] is not None:
@@ -355,7 +356,7 @@ def train(
                     dataset.labels, nc=nc, class_weights=cw
                 )  # image weights
                 dataset.indices = random.choices(
-                    range(dataset.n), weights=iw, k=dataset.n
+                    range(dataset.n), weights=iw, k=dataset.n  # type: ignore
                 )  # rand weighted idx
             # Broadcast if DDP
             if rank != -1:
@@ -419,7 +420,7 @@ def train(
 
             # Multi-scale
             if opt.multi_scale:
-                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # type: ignore
                 sf = sz / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     ns = [
@@ -499,7 +500,7 @@ def train(
                     opt.data,
                     batch_size=total_batch_size,
                     imgsz=imgsz_test,
-                    model=ema.ema,
+                    model=ema.ema,  # type: ignore
                     single_cls=opt.single_cls,
                     dataloader=testloader,
                 )
@@ -782,8 +783,9 @@ if __name__ == "__main__":
         ckpt = (
             opt.resume if isinstance(opt.resume, str) else get_latest_run()
         )  # specified or most recent path
-        log_dir = Path(ckpt).parent.parent  # runs/exp0
-        assert os.path.isfile(ckpt), "ERROR: --resume checkpoint does not exist"
+        # runs/exp0
+        log_dir = Path(ckpt).parent.parent  # type: ignore
+        assert os.path.isfile(ckpt), "ERROR: --resume checkpoint does not exist"  # type: ignore
         with open(log_dir / "opt.yaml") as f:
             opt = argparse.Namespace(**yaml.load(f, Loader=yaml.FullLoader))  # replace
         opt.cfg, opt.weights, opt.resume = "", ckpt, True

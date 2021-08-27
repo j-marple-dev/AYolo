@@ -296,7 +296,8 @@ def get_primary_result(
                 if "gt" not in bbox_scores.fp2bboxes[img_fp].keys():
                     if len(labels) > 0:
                         # target boxes
-                        tbox_normal = xywh2xyxy(labels[:, 1:5]).cpu().numpy()
+                        np_labels = labels.cpu().numpy()
+                        tbox_normal = xywh2xyxy(np_labels[:, 1:5])
                         bbox_scores.fp2bboxes[img_fp]["gt"] = np.concatenate(
                             [labels[:, 0:1].cpu().numpy(), tbox_normal],  # cls_id
                             axis=1,
@@ -572,7 +573,7 @@ def get_profile_stats(
         )
 
     # get image size
-    imgsz = check_img_size(img_size, s=model.stride.max())  # check img_size
+    imgsz = check_img_size(img_size, s=int(model.stride.max()))  # check img_size
 
     # model param check
     print(
