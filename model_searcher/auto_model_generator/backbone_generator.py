@@ -226,9 +226,9 @@ class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
         block_type = self.trial.suggest_categorical(
             self._get_suggest_name("block_type"),
             [
-                "MBConv",
-                "InvertedResidualv2",
-                "InvertedResidualv3",
+                # "MBConv",
+                # "InvertedResidualv2",
+                # "InvertedResidualv3",
                 "BottleneckCSP",
                 "Bottleneck",
             ],
@@ -294,8 +294,11 @@ class AutoEffNetGenerator(AutoBackboneGeneratorAbstract):
 
             if strides[i] == 2:
                 p_idx.append(len(model) - 1)
+
+            # TODO(ulken94): Keep raising error here, need to check why
             if not isinstance(conv_type, str):
                 raise TypeError
+
             model += ArgGen.get_block_args(
                 -1,
                 block_type,

@@ -103,7 +103,9 @@ def check_git_status() -> None:
             "if [ -d .git ]; then git fetch && git status -uno; fi", shell=True
         ).decode("utf-8")
         if "Your branch is behind" in s:
-            print(s[s.find("Your branch is behind"):s.find("\n\n")] + "\n")
+            start = s.find("Your branch is behind")
+            end = s.find("\n\n")
+            print(s[start:end] + "\n")
 
 
 def check_img_size(img_size: int, s: int = 32) -> int:
@@ -442,10 +444,9 @@ def scale_coords(
             img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1]
         )  # gain  = old / new
         pad: Union[Tuple[float, float], torch.Tensor] = (
-            img1_shape[1] - img0_shape[1] * gain
-        ) / 2, (
-            img1_shape[0] - img0_shape[0] * gain
-        ) / 2  # wh padding
+            (img1_shape[1] - img0_shape[1] * gain) / 2,
+            (img1_shape[0] - img0_shape[0] * gain) / 2,
+        )  # wh padding
     else:
         gain = ratio_pad[0][0]
         pad = ratio_pad[1]
@@ -1372,7 +1373,8 @@ def apply_classifier(
             pred_cls1 = d[:, 5].long()
             ims = []
             for _, a in enumerate(d):  # per item
-                cutout = im0[i][int(a[1]):int(a[3]), int(a[0]):int(a[2])]
+                x1, y1, x2, y2 = (int(a[1]), int(a[3]), int(a[0]), int(a[2]))
+                cutout = im0[i][x1:y1, x2:y2]
                 im = cv2.resize(cutout, (224, 224))  # BGR
                 # cv2.imwrite('test%i.jpg' % j, cutout)
 
@@ -1721,7 +1723,7 @@ def plot_images(
     # https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
 
     def hex2rgb(h):  # noqa
-        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
+        return tuple(int(h[1 + i : 1 + i + 2], 16) for i in (0, 2, 4))  # noqa
 
     # hex2rgb = lambda h: tuple(int(h[1 + i : 1 + i + 2], 16) for i in (0, 2, 4))
     color_lut = [hex2rgb(h) for h in prop_cycle.by_key()["color"]]
@@ -1737,7 +1739,7 @@ def plot_images(
         if scale_factor < 1:
             img = cv2.resize(img, (w, h))
 
-        mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
+        mosaic[block_y : block_y + h, block_x : block_x + w, :] = img  # noqa
         if len(np_targets) > 0:
             image_targets = np_targets[np_targets[:, 0] == i]
             boxes = xywh2xyxy(image_targets[:, 2:6]).T

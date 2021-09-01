@@ -108,7 +108,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--single-cls",
         dest="single_cls",
-        default=True,
         action="store_true",
         help="train as single-class dataset",
     )

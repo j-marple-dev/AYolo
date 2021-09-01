@@ -580,7 +580,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 self.imgs = [imgs[i][0] for i in range(len(imgs))]
                 self.img_hw0 = [imgs[i][1] for i in range(len(imgs))]
                 self.img_hw = [imgs[i][2] for i in range(len(imgs))]
-                # import pdb; pdb.set_trace()
 
             else:
                 gb = 0  # Gigabytes of cached images

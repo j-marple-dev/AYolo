@@ -301,6 +301,7 @@ class AbstractOptimizer(ABC):
                 fi = fitness(
                     np.array(results[0]["total"]).reshape(1, -1)  # type: ignore
                 )  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+
                 if fi > best_fitness:
                     best_fitness = fi
 
