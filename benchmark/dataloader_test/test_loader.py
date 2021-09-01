@@ -1,3 +1,4 @@
+"""Test dataloader for all available options."""
 import argparse
 import os
 
@@ -78,17 +79,17 @@ if __name__ == "__main__":
     os.system(command)
     """
     command = f'export PYTHONPATH="$PWD" && python benchmark/dataloader_test/run_loader.py --expdir {opt.expdir} --img_size {opt.img_size[0]} {opt.img_size[1]} --batch_size {opt.batch_size} --num_workers {opt.num_workers} --device {opt.device} --dtype fp16 --dataloader dali -ie torch'
-    print(f"########## [Dali, torch, fp16] ##########")
+    print("########## [Dali, torch, fp16] ##########")
     os.system(command)
 
     command = f'export PYTHONPATH="$PWD" && python benchmark/dataloader_test/run_loader.py --expdir {opt.expdir} --img_size {opt.img_size[0]} {opt.img_size[1]} --batch_size {opt.batch_size} --num_workers {opt.num_workers} --device {opt.device} --dtype fp32 --dataloader dali -ie trt'
-    print(f"########## [Dali, trt, fp32] ##########")
+    print("########## [Dali, trt, fp32] ##########")
     os.system(command)
 
     command = f'export PYTHONPATH="$PWD" && python benchmark/dataloader_test/run_loader.py --expdir {opt.expdir} --img_size {opt.img_size[0]} {opt.img_size[1]} --batch_size {opt.batch_size} --num_workers {opt.num_workers} --device {opt.device} --dtype fp16 --dataloader dali -ie trt'
-    print(f"########## [Dali, trt, fp16] ##########")
+    print("########## [Dali, trt, fp16] ##########")
     os.system(command)
 
     command = f'export PYTHONPATH="$PWD" && python benchmark/dataloader_test/run_loader.py --expdir {opt.expdir} --img_size {opt.img_size[0]} {opt.img_size[1]} --batch_size {opt.batch_size} --num_workers {opt.num_workers} --device {opt.device} --dtype int8 --dataloader dali -ie trt'
-    print(f"########## [Dali, trt, int8] ##########")
+    print("########## [Dali, trt, int8] ##########")
     os.system(command)

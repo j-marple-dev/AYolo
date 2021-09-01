@@ -3,17 +3,17 @@
 - Author: Jongkuk Lim
 - Contact: limjk@jmarple.ai
 """
-from typing import Dict, List
+from typing import Dict
 
 import optuna
 
-from model_searcher.auto_model_generator.backbone_generator import (
+from model_searcher.auto_model_generator.backbone_generator import (  # noqa: F401
     AutoDarkNetGenerator, AutoEffNetGenerator, AutoNoBackboneGenerator)
-from model_searcher.auto_model_generator.neck_generator import (
+from model_searcher.auto_model_generator.neck_generator import (  # noqa: F401
     AutoBiFPNGenerator, AutoTinyNeckGenerator, AutoYOLONeckGenerator)
 
 
-def get_default_anchor(n_anchor: int, n: int = 3):
+def get_default_anchor(n_anchor: int, n: int = 3) -> list:
     """Get default anchors by neck_type whereby utilizes 3 or 5 layers."""
     anchors = {
         1: [[10, 13, 16, 30, 33, 23]],
@@ -39,6 +39,8 @@ def get_default_anchor(n_anchor: int, n: int = 3):
 
 
 class AutoModelGenerator:
+    """Auto model generator class."""
+
     BACKBONE_TYPE = [
         "DarkNet",
         "EffNet",
@@ -46,7 +48,8 @@ class AutoModelGenerator:
     ]
     NECK_TYPE = ["YOLONeck", "TinyNeck", "BiFPN"]
 
-    def __init__(self, trial: optuna.trial.Trial):
+    def __init__(self, trial: optuna.trial.Trial) -> None:
+        """Initialize AutoModelGenerator class."""
         self.trial = trial
         self.backbone_type = trial.suggest_categorical(
             "cfg.backbone_type", AutoModelGenerator.BACKBONE_TYPE
@@ -62,6 +65,7 @@ class AutoModelGenerator:
         self.n_anchor = trial.suggest_int("n_anchor", 1, 3)
 
     def generate_model(self) -> Dict:
+        """Generate model."""
         backbone, p_idx = self.backbone_generator.generate_backbone()
 
         if len(p_idx) <= 2:
@@ -70,7 +74,7 @@ class AutoModelGenerator:
         self.neck_generator = eval(f"Auto{self.neck_type}Generator")(
             self.trial, self.neck_type, p_idx
         )
-        neck, feat_idx = self.neck_generator.generate_neck()
+        neck, feat_idx = self.neck_generator.generate_neck()  # type: ignore
 
         if len(neck[0]) > 0:
             head = neck + [[feat_idx, 1, "Detect", ["nc", "anchors"]]]

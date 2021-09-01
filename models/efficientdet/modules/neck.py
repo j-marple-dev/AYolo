@@ -4,7 +4,7 @@
 - Contact: limjk@jmarple.ai
 """
 
-from typing import List
+from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -19,8 +19,11 @@ class FuseSum(nn.Module):
     Details are from https://arxiv.org/abs/1911.09070
     """
 
-    def __init__(self, n: int, weight: bool = True, act: bool = True, epsilon=1e-4):
-        """Initialize FuseSum
+    def __init__(
+        self, n: int, weight: bool = True, act: bool = True, epsilon: float = 1e-4
+    ) -> None:
+        """Initialize FuseSum.
+
         Args:
             n: number of layers to be fused.
             weight: True: use a weighted sum.
@@ -39,18 +42,21 @@ class FuseSum(nn.Module):
             )  # layer weights
             self.w_act = nn.ReLU(inplace=False)
 
-    def forward(self, x):
-        x = torch.stack(x)
+    def forward(
+        self, x: Union[Tuple[torch.Tensor, ...], List[torch.Tensor]]
+    ) -> torch.Tensor:
+        """Feed forward."""
+        x_stack = torch.stack(x)
         if self.weighted_fuse:
             self.w_act.inplace = False
 
             weight_act = self.w_act(self.weight)
             weight = weight_act / (torch.sum(weight_act, dim=0) + self.epsilon)
-            weight_dim = weight.view([self.n] + [1] * (len(x.shape) - 1))
+            weight_dim = weight.view([self.n] + [1] * (len(x_stack.shape) - 1))
 
-            out = (x * weight_dim).sum(dim=0)
+            out = (x_stack * weight_dim).sum(dim=0)
         else:
-            out = x.sum(dim=0)
+            out = x_stack.sum(dim=0)
 
         out = self.act(out)
 
@@ -60,8 +66,11 @@ class FuseSum(nn.Module):
 class BiFPNLayer(nn.Module):
     """Bi-directional Feature Pyramid Network with repeated layer."""
 
-    def __init__(self, n_repeat: int, n_channels: int, conv_in_channels: List[int]):
-        """
+    def __init__(
+        self, n_repeat: int, n_channels: int, conv_in_channels: List[int]
+    ) -> None:
+        """Initialize BiFPN layer.
+
         Args:
             n_repeat:
             n_channels:
@@ -85,7 +94,8 @@ class BiFPNLayer(nn.Module):
             )
         )
 
-    def forward(self, inputs):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         return self.bifpn(inputs)
 
 
@@ -94,7 +104,7 @@ class BiFPN(nn.Module):
 
     def __init__(
         self, n_channels: int, conv_in_channels: List[int], first: bool = False
-    ):
+    ) -> None:
         """Initialize BiFPN layer.
 
         Code was written based on https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch/blob/8b4139fc13afa617b2dad811d4a776b9016af7cf/efficientdet/model.py
@@ -160,8 +170,9 @@ class BiFPN(nn.Module):
         self.op_p6_down_fuse = FuseSum(3)
         self.op_p7_down_fuse = FuseSum(2)
 
-    def forward(self, inputs):
-        """
+    def forward(self, inputs: torch.Tensor) -> List[torch.Tensor]:
+        """Feed forward.
+
         Args:
             inputs:
         Returns:

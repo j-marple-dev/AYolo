@@ -4,14 +4,15 @@
 - Contact: lim.jeikei@gmail.com
 """
 
-from typing import Union
+from typing import Optional, Union
 
 import optuna
 import yaml
 
 
-def load_study_conf(study_conf):
-    with open(study_conf) as f:
+def load_study_conf(study_conf_file: str) -> dict:
+    """Load study config."""
+    with open(study_conf_file) as f:
         study_conf = yaml.load(f, yaml.FullLoader)
 
     if "hyp_config" in study_conf:
@@ -24,16 +25,17 @@ def load_study_conf(study_conf):
 
 
 def create_load_study_with_config(
-    study_conf,
-    study_name,
+    study_conf: str,
+    study_name: str,
     storage: Union[str, optuna.storages.RDBStorage, None] = None,
     load_if_exists: bool = True,
     overwrite_user_attr: bool = False,
-):
-    study_conf = load_study_conf(study_conf)
+) -> Optional[optuna.study.Study]:
+    """Create study with config file."""
+    study_conf_yaml = load_study_conf(study_conf)
 
     assert study_name != "", "Study name must be given."
-    assert study_conf["direction"] in [
+    assert study_conf_yaml["direction"] in [
         "minimize",
         "maximize",
     ], "Direction must be either 'minimize' or 'maximize'"
@@ -41,7 +43,7 @@ def create_load_study_with_config(
     try:
         study = optuna.create_study(
             study_name=study_name,
-            direction=study_conf["direction"],
+            direction=study_conf_yaml["direction"],
             storage=storage,
             load_if_exists=load_if_exists,
         )
@@ -49,7 +51,7 @@ def create_load_study_with_config(
         print("Study already exists!")
         return None
 
-    for k, v in study_conf["study_attr"].items():
+    for k, v in study_conf_yaml["study_attr"].items():
         if overwrite_user_attr or k not in study.user_attrs:
             study.set_user_attr(k, v)
 
@@ -57,7 +59,10 @@ def create_load_study_with_config(
 
 
 class OptunaParameterManager:
-    def __init__(self, study_conf):
+    """Class for manage optuna paramters."""
+
+    def __init__(self, study_conf: str) -> None:
+        """Initialize OptunaParameterManager class."""
         self.local_conf = load_study_conf(study_conf)
 
         self.local_study_attr = self.local_conf["study_attr"]
@@ -66,12 +71,13 @@ class OptunaParameterManager:
         for k in self.local_study_attr.keys():
             self.__setattr__(k, self.__get_property(k))
 
-    def set_trial(self, trial):
+    def set_trial(self, trial: optuna.trial.Trial) -> None:
+        """Set optuna trial."""
         self.trial = trial
         for k in self.trial.study.user_attrs.keys():
             self.__setattr__(k, self.__get_property(k))
 
-    def __get_property(self, name):
+    def __get_property(self, name: str) -> str:
         if self.trial and name in self.trial.study.user_attrs:
             return self.trial.study.user_attrs[name]
         else:

@@ -1,7 +1,12 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import abc
 import json
 from queue import Empty
-from typing import Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -9,14 +14,21 @@ from torch.multiprocessing import Process, Queue
 
 from utils.general import scale_coords
 
+if TYPE_CHECKING:
+    from tensorrt_run.dataset.dataset_dali import DaliDataloaderPipeline
+
 
 class MultiProcessQueue(abc.ABC):
-    def __init__(self):
-        self.queue = Queue()
-        self.consumer_proc = None
+    """MultiProcessQueue abstract class."""
+
+    def __init__(self) -> None:
+        """Initialize MultiProcessQueue abstract class."""
+        self.queue: Queue = Queue()
+        self.consumer_proc: Optional[Process] = None
         self.run = False
 
-    def start(self):
+    def start(self) -> None:
+        """Start multi process."""
         if self.consumer_proc is not None:
             self.close()
 
@@ -25,45 +37,61 @@ class MultiProcessQueue(abc.ABC):
         self.run = True
         self.consumer_proc.start()
 
-    def add_queue(self, obj):
+    def add_queue(self, obj: object) -> None:
+        """Add object to queue."""
         self.queue.put(obj)
 
-    def queue_proc(self):
+    def queue_proc(self) -> None:
+        """Process the queue."""
         while self.run:
             try:
                 args = self.queue.get(timeout=0.1)
                 self.consumer(args)
-            except Empty as error:
+            except Empty as error:  # noqa
                 pass
 
     @abc.abstractmethod
-    def consumer(self, args):
+    def consumer(self, args: Any) -> None:
+        """Abstract method of consumer."""
         pass
 
-    def close(self):
+    def close(self) -> None:
+        """Close the process."""
         self.add_queue("DONE")
-        self.consumer_proc.join()
+        if self.consumer_proc is not None:
+            self.consumer_proc.join()
 
 
 class ResultWriterBase(MultiProcessQueue, abc.ABC):
-    def __init__(self, original_shape=(1080, 1920)):
+    """Base class of ResultWriter class."""
+
+    def __init__(self, original_shape: Tuple[int, int] = (1080, 1920)) -> None:
+        """Initialize ResultWriterBase class."""
         super(ResultWriterBase, self).__init__()
 
-        self.total_container = {"annotations": [], "param_num": 0, "inference_time": 0}
+        self.total_container: Dict[str, Union[list, int, float, str]] = {
+            "annotations": [],
+            "param_num": 0,
+            "inference_time": 0,
+        }
         self.original_shape = original_shape
-        self.seen_paths = set()
+        self.seen_paths: set = set()
 
-    def set_param_num(self, n_params: int):
+    def set_param_num(self, n_params: int) -> None:
+        """Set number of parameters."""
         self.total_container["param_num"] = str(n_params)
 
-    def set_inference_time(self, n_time: int):
+    def set_inference_time(self, n_time: int) -> None:
+        """Set inference time."""
         self.total_container["inference_time"] = str(n_time)
 
     @abc.abstractmethod
-    def scale_coords(self, *args):
+    def scale_coords(self, *args: Any) -> Any:
+        """Scale coordinates."""
         pass
 
-    def consumer(self, args):
+    def consumer(self, args: Any) -> None:
+        """Consume results."""
         if isinstance(args, str) and args == "DONE":
             self.to_json("t4_res_U0000000229.json")
             # self.to_json("t4_res_jhlee.json")
@@ -76,11 +104,24 @@ class ResultWriterBase(MultiProcessQueue, abc.ABC):
         else:
             self._add_outputs(*args)
 
-    def add_outputs(self, names, outputs, img_size, shapes=None):
+    def add_outputs(
+        self,
+        names: str,
+        outputs: list,
+        img_size: Union[list, Tuple[int, int], np.ndarray],
+        shapes: Optional[Union[list, tuple, np.ndarray]] = None,
+    ) -> None:
+        """Add outputs."""
         outputs = [o.cpu().numpy() if o is not None else None for o in outputs]
         self.add_queue((names, outputs, img_size, shapes))
 
-    def _add_outputs(self, names, outputs, img_size, shapes=None):
+    def _add_outputs(
+        self,
+        names: Union[list, tuple],
+        outputs: Union[list, tuple],
+        img_size: Union[list, Tuple[int, int], np.ndarray],
+        shapes: Optional[Union[list, tuple, np.ndarray]] = None,
+    ) -> None:
         for i in range(len(names)):
             bbox = outputs[i][:, :4] if outputs[i] is not None else None
 
@@ -101,8 +142,9 @@ class ResultWriterBase(MultiProcessQueue, abc.ABC):
         path: str,
         bboxes: Union[None, torch.Tensor, np.ndarray],
         confs: Union[None, torch.Tensor, np.ndarray],
-    ):
-        """
+    ) -> None:
+        """Add predicted box.
+
         Args:
             path: image filepath. e.g.: "0608_V0011_000.jpg"
             predicts: predicted bboxes with shape [number_of_NMS_filtered_predictions, 4],
@@ -121,38 +163,45 @@ class ResultWriterBase(MultiProcessQueue, abc.ABC):
                     "position": [int(p) for p in row],
                     "confidence_score": str(conf.item()),
                 }
-                for row, conf in zip(bboxes, confs)
+                for row, conf in zip(bboxes, confs)  # type: ignore
             ]
-        self.total_container["annotations"].append(
+        self.total_container["annotations"].append(  # type: ignore
             {
                 "file_name": path,
                 "objects": objects,
             }
         )
 
-    def filter_small_box(self):
-        for i, annot in enumerate(self.total_container["annotations"]):
+    def filter_small_box(self) -> None:
+        """Filter small boxes."""
+        annot: dict
+        for i, annot in enumerate(self.total_container["annotations"]):  # type: ignore
             obj_candidate = []
-            for j, obj_annot in enumerate(annot["objects"]):
+            for _, obj_annot in enumerate(annot["objects"]):
                 pos = np.array(obj_annot["position"])
                 w = np.diff(pos[0::2])
                 h = np.diff(pos[1::2])
                 if w >= 32 and h >= 32:
                     obj_candidate.append(obj_annot)
 
-            self.total_container["annotations"][i]["objects"] = obj_candidate
+            self.total_container["annotations"][i]["objects"] = obj_candidate  # type: ignore
 
-    def to_json(self, filepath: str):
+    def to_json(self, filepath: str) -> None:
+        """Dump to json."""
         self.filter_small_box()
         with open(filepath, "w") as f:
             json.dump(self.total_container, f)
 
 
 class ResultWriterTorch(ResultWriterBase):
-    def __init__(self, *args, **kwargs):
+    """Result writer class for torch outputs."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize ResultWriterTorch class."""
         super(ResultWriterTorch, self).__init__(*args, **kwargs)
 
-    def scale_coords(self, img_shape, bboxes, ratio_pad):
+    def scale_coords(self, img_shape: Union[List[int], Tuple[int, int], torch.Size], bboxes: Union[np.ndarray, torch.Tensor], ratio_pad: Optional[Union[torch.Tensor, np.ndarray, list, tuple]]) -> Union[np.ndarray, torch.Tensor]:  # type: ignore
+        """Scale coordinates."""
         if bboxes is None:
             return None
 
@@ -160,11 +209,17 @@ class ResultWriterTorch(ResultWriterBase):
 
 
 class ResultWriterDali(ResultWriterBase):
-    def __init__(self, dali_pipeline, *args, **kwargs):
+    """REsult Writer for Dali dataloader."""
+
+    def __init__(
+        self, dali_pipeline: "DaliDataloaderPipeline", *args: Any, **kwargs: Any
+    ) -> None:
+        """Initialize ResultWriterDali."""
         super(ResultWriterDali, self).__init__(*args, **kwargs)
         self.dali_pipeline = dali_pipeline
 
-    def scale_coords(self, img_shape, bboxes):
+    def scale_coords(self, img_shape: Union[List[int], Tuple[int, int], torch.Size], bboxes: Union[torch.Tensor, np.ndarray]) -> Union[np.ndarray, torch.Tensor]:  # type: ignore
+        """Scale coordinates."""
         if bboxes is None:
             return None
 

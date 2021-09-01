@@ -84,7 +84,7 @@ if __name__ == "__main__":
         "--threshold-n-param",
         type=float,
         default=1.0,
-        help=f"Threshold of parameter number from baseline parameter.",
+        help="Threshold of parameter number from baseline parameter.",
     )
     parser.add_argument(
         "--device", default="", help="cuda device, i.e. 0 or 0,1,2,3 or cpu"
@@ -108,7 +108,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--single-cls",
         dest="single_cls",
-        default=True,
         action="store_true",
         help="train as single-class dataset",
     )

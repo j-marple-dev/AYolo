@@ -244,8 +244,5 @@ crashlytics.properties
 crashlytics-build.properties
 fabric.properties
 
-# AIGC dataset symlink root
-dataset/*
-
 # wandb log directory.
 wandb

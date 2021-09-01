@@ -1,10 +1,18 @@
+"""Dali dataloader module."""
+import logging
+from typing import List, Optional, Union
+
+import numpy as np
+import torch
+
 DATA_BACKEND_CHOICES = ["pytorch"]
 
 try:
+    import nvidia
     import nvidia.dali.ops as ops
     import nvidia.dali.types as types
     from nvidia.dali.pipeline import Pipeline
-    from nvidia.dali.plugin.pytorch import DALIGenericIterator, feed_ndarray
+    from nvidia.dali.plugin.pytorch import feed_ndarray
 
     DATA_BACKEND_CHOICES.append("dali-gpu")
     DATA_BACKEND_CHOICES.append("dali-cpu")
@@ -13,14 +21,17 @@ except ImportError:
         "Please install DALI from https://www.github.com/NVIDIA/DALI to run this example."
     )
 
-import logging
-
-import numpy as np
-import torch
-
 
 class SimpleObjectDetectionPipeline(Pipeline):
-    def __init__(self, batch_size, num_threads, device_id):
+    """Simple data pipeline for object detection."""
+
+    def __init__(
+        self,
+        batch_size: Optional[int],
+        num_threads: Optional[int],
+        device_id: Optional[int],
+    ) -> None:
+        """Initialize SimpleObjectDetectionPipeline."""
         super(SimpleObjectDetectionPipeline, self).__init__(
             batch_size, num_threads, device_id, seed=12
         )
@@ -37,7 +48,8 @@ class SimpleObjectDetectionPipeline(Pipeline):
         self.nchw = ops.Transpose(device="gpu", perm=(2, 0, 1), transpose_layout=False)
         self.norm = ops.Normalize(device="gpu", mean=0.0, stddev=255.0)
 
-    def define_graph(self):
+    def define_graph(self) -> tuple:
+        """Define data preprocessing pipeline."""
         inputs, bboxes, labels = self.input()
         images = self.decode(inputs)
         images = self.resize(images)
@@ -70,7 +82,8 @@ class DALICOCOIterator(object):
            Epoch size.
     """
 
-    def __init__(self, pipelines, size):
+    def __init__(self, pipelines: Union[List[Pipeline], Pipeline], size: int) -> None:
+        """Initialize DALICOCOIterator."""
         if not isinstance(pipelines, list):
             pipelines = [pipelines]
 
@@ -95,9 +108,10 @@ class DALICOCOIterator(object):
         # We need data about the batches (like shape information),
         # so we need to run a single batch as part of setup to get that info
         self._first_batch = None
-        self._first_batch = self.next()
+        self._first_batch = next(self)  # type: ignore
 
-    def __next__(self):
+    def __next__(self) -> list:
+        """Get next data."""
         if self._first_batch is not None:
             batch = self._first_batch
             self._first_batch = None
@@ -130,15 +144,15 @@ class DALICOCOIterator(object):
             images_shape = [x.shape() for x in images]
 
             # Prepare bboxes shapes
-            bboxes_shape = []
+            bboxes_shape: list = []
             for j in range(len(bboxes)):
                 bboxes_shape.append([])
                 for k in range(len(bboxes[j])):
                     bboxes_shape[j].append(bboxes[j][k].shape())
 
             # Prepare labels shapes and offsets
-            labels_shape = []
-            bbox_offsets = []
+            labels_shape: list = []
+            bbox_offsets: list = []
 
             torch.cuda.synchronize()
             for j in range(len(labels)):
@@ -180,7 +194,7 @@ class DALICOCOIterator(object):
                 for offset in bbox_offsets
             ]
 
-            self._data_batches[i][self._current_data_batch] = (
+            self._data_batches[i][self._current_data_batch] = (  # type: ignore
                 pyt_images,
                 pyt_bboxes,
                 pyt_labels,
@@ -195,13 +209,13 @@ class DALICOCOIterator(object):
                 for k in range(len(b_list)):
                     if pyt_bboxes[j][k].shape[0] != 0:
                         feed_ndarray(b_list[k], pyt_bboxes[j][k])
-                pyt_bboxes[j] = torch.cat(pyt_bboxes[j])
+                pyt_bboxes[j] = torch.cat(pyt_bboxes[j])  # type: ignore
 
             for j, l_list in enumerate(labels):
                 for k in range(len(l_list)):
                     if pyt_labels[j][k].shape[0] != 0:
                         feed_ndarray(l_list[k], pyt_labels[j][k])
-                pyt_labels[j] = torch.cat(pyt_labels[j]).squeeze(dim=1)
+                pyt_labels[j] = torch.cat(pyt_labels[j]).squeeze(dim=1)  # type: ignore
 
             for j in range(len(pyt_offsets)):
                 pyt_offsets[j] = torch.IntTensor(bbox_offsets[j])
@@ -216,15 +230,16 @@ class DALICOCOIterator(object):
         self._counter += self._num_gpus * self.batch_size
         return [db[copy_db_index] for db in self._data_batches]
 
-    def next(self):
-        """Returns the next batch of data."""
+    def next(self) -> list:
+        """Return the next batch of data."""
         return self.__next__()
 
-    def __iter__(self):
+    def __iter__(self) -> object:
+        """Get iterator."""
         return self
 
-    def reset(self):
-        """Resets the iterator after the full epoch.
+    def reset(self) -> None:
+        """Reset the iterator after the full epoch.
 
         DALI iterators do not support resetting before the end of the epoch and will
         ignore such request.
@@ -248,7 +263,8 @@ class DALIYOLOIterator(object):
            Epoch size.
     """
 
-    def __init__(self, pipelines, size):
+    def __init__(self, pipelines: Union[List[Pipeline], Pipeline], size: int) -> None:
+        """Initialize DALIYOLOIterator class."""
         if not isinstance(pipelines, list):
             pipelines = [pipelines]
 
@@ -273,9 +289,10 @@ class DALIYOLOIterator(object):
         # We need data about the batches (like shape information),
         # so we need to run a single batch as part of setup to get that info
         self._first_batch = None
-        self._first_batch = self.next()
+        self._first_batch = next(self)  # type: ignore
 
-    def __next__(self):
+    def __next__(self) -> list:
+        """Get next data."""
         if self._first_batch is not None:
             batch = self._first_batch
             self._first_batch = None
@@ -309,8 +326,8 @@ class DALIYOLOIterator(object):
             images_shape = [x.shape() for x in images]
 
             # Prepare bboxes shapes
-            bboxes_shape = []
-            targets_shape = []
+            bboxes_shape: list = []
+            targets_shape: list = []
             for j in range(len(bboxes)):
                 bboxes_shape.append([])
                 targets_shape.append([])
@@ -321,8 +338,8 @@ class DALIYOLOIterator(object):
                     targets_shape[j].append(shap)
 
             # Prepare labels shapes and offsets
-            labels_shape = []
-            bbox_offsets = []
+            labels_shape: list = []
+            bbox_offsets: list = []
 
             torch.cuda.synchronize()
             for j in range(len(labels)):
@@ -339,7 +356,7 @@ class DALIYOLOIterator(object):
             bboxes_torch_type = to_torch_type[np.dtype(bboxes[0][0].dtype())]
             labels_torch_type = to_torch_type[np.dtype(labels[0][0].dtype())]
 
-            targets_torch_type = to_torch_type[np.dtype(bboxes[0][0].dtype())]
+            # targets_torch_type = to_torch_type[np.dtype(bboxes[0][0].dtype())]
 
             torch_gpu_device = torch.device("cuda", dev_id)
             torch_cpu_device = torch.device("cpu")
@@ -362,7 +379,7 @@ class DALIYOLOIterator(object):
                 ]
                 for shape_list in labels_shape
             ]
-            pyt_offsets = [
+            pyt_offsets = [  # noqa: F841
                 torch.zeros(len(offset), dtype=torch.int32, device=torch_cpu_device)
                 for offset in bbox_offsets
             ]
@@ -376,7 +393,7 @@ class DALIYOLOIterator(object):
             ]
 
             # self._data_batches[i][self._current_data_batch] = (pyt_images, pyt_bboxes, pyt_labels, pyt_offsets)
-            self._data_batches[i][self._current_data_batch] = (pyt_images, pyt_targets)
+            self._data_batches[i][self._current_data_batch] = (pyt_images, pyt_targets)  # type: ignore
 
             # Copy data from DALI Tensors to torch tensors
             for j, i_arr in enumerate(images):
@@ -405,9 +422,9 @@ class DALIYOLOIterator(object):
                         feed_ndarray(l_list[k], pyt_labels[j][k])
                     idx.append(k * torch.ones_like(pyt_labels[j][k]))
                 indices = torch.cat(idx)
-                bboxes = torch.cat(pyt_bboxes[j])
-                labels = torch.cat(pyt_labels[j])
-                pyt_targets[i] = torch.cat((indices, labels, bboxes), dim=1)
+                t_bboxes = torch.cat(pyt_bboxes[j])
+                t_labels = torch.cat(pyt_labels[j])
+                pyt_targets[i] = torch.cat((indices, t_labels, t_bboxes), dim=1)  # type: ignore
 
         for p in self._pipes:
             p.release_outputs()
@@ -419,15 +436,16 @@ class DALIYOLOIterator(object):
         self._counter += self._num_gpus * self.batch_size
         return [db[copy_db_index] for db in self._data_batches]
 
-    def next(self):
-        """Returns the next batch of data."""
+    def next(self) -> list:
+        """Return the next batch of data."""
         return self.__next__()
 
-    def __iter__(self):
+    def __iter__(self) -> object:
+        """Iterate dataloader."""
         return self
 
-    def reset(self):
-        """Resets the iterator after the full epoch.
+    def reset(self) -> None:
+        """Reset the iterator after the full epoch.
 
         DALI iterators do not support resetting before the end of the epoch and will
         ignore such request.
@@ -440,14 +458,14 @@ class DALIYOLOIterator(object):
             )
 
 
-def show_images(image_batch):
-    import matplotlib.gridspec as gridspec
+def show_images(image_batch: nvidia.dali.backend.TensorListCPU) -> None:
+    """Show batch images."""
     import matplotlib.pyplot as plt
     import numpy as np
 
     columns = 2
     rows = 2
-    fig = plt.figure(figsize=(32, (32 // columns) * rows))
+    fig = plt.figure(figsize=(32, (32 // columns) * rows))  # noqa
     np_img = np.array(image_batch.at(0)).transpose((1, 2, 0))
     plt.imshow(np_img)
     print(f"min: {np.min(np_img)} max: {np.max(np_img)} avg: {np.mean(np_img)}")
@@ -458,11 +476,11 @@ if __name__ == "__main__":
     """DALI test."""
 
     # Test output image
-    pipe = SimplePipeline(64, 8, 0)
-    pipe.build()
-    pipe_out = pipe.run()
-    images_cpu = pipe_out[0].as_cpu()
-    show_images(images_cpu)
+    # pipe = SimplePipeline(64, 8, 0)
+    # pipe.build()
+    # pipe_out = pipe.run()
+    # images_cpu = pipe_out[0].as_cpu()
+    # show_images(images_cpu)
 
     # Test DataIterator
     pipe_iter = SimpleObjectDetectionPipeline(64, 8, 0)
@@ -473,6 +491,6 @@ if __name__ == "__main__":
         pipe_iter.release_outputs(),
     )
     dataloader = DALICOCOIterator(pipe_iter, size=10000000)
-    for nbatch, data in enumerate(dataloader):
+    for _nbatch, _data in enumerate(dataloader):  # type: ignore
         # do sth
         continue

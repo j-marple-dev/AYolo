@@ -4,12 +4,13 @@
 - Contact: limjk@jmarple.ai
 """
 
-
+import argparse
 import logging
 import math
 import os
 import random
-from pathlib import Path
+from pathlib import Path, PosixPath
+from typing import Any, Callable, Union
 
 import numpy as np
 import torch
@@ -19,17 +20,22 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
+import tqdm
 import yaml
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from utils.datasets import create_dataloader
+from models.yolo import Model
+from utils.datasets import LoadImagesAndLabels, create_dataloader
 from utils.general import (check_dataset, init_seeds, labels_to_class_weights,
                            labels_to_image_weights, strip_optimizer,
                            torch_distributed_zero_first)
 from utils.torch_utils import ModelEMA
 
 
-def init_train_configuration(hyp, opt, device):
+def init_train_configuration(
+    hyp: dict, opt: argparse.Namespace, device: torch.device
+) -> tuple:
+    """Initialize train configurations."""
     log_dir = Path(opt.logdir)
     weights_dir = log_dir / "weights"  # weights directory
     os.makedirs(weights_dir, exist_ok=True)
@@ -86,16 +92,17 @@ def init_train_configuration(hyp, opt, device):
 
 
 def train_loop_save_model(
-    model,
-    optimizer,
-    last_path,
-    best_path,
-    results_file_path,
-    epoch,
-    fi,
-    best_fitness,
-    final_epoch,
-):
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    last_path: str,
+    best_path: str,
+    results_file_path: str,
+    epoch: int,
+    fi: float,
+    best_fitness: float,
+    final_epoch: int,
+) -> None:
+    """Save model in the train loop."""
     with open(results_file_path, "r") as f:  # create checkpoint
         ckpt = {
             "epoch": epoch,
@@ -112,8 +119,16 @@ def train_loop_save_model(
 
 
 def train_loop_set_warmup_phase(
-    optimizer, hyp, total_batch_size, nbs, ni, nw, epoch, lf
-):
+    optimizer: torch.optim.Optimizer,
+    hyp: dict,
+    total_batch_size: int,
+    nbs: int,
+    ni: int,
+    nw: int,
+    epoch: int,
+    lf: Callable[[Any], Any],
+) -> tuple:
+    """Set warmup phase in train loop."""
     xi = [0, nw]  # x interp
     # model.gr = np.interp(ni, xi, [0.0, 1.0])  # iou loss ratio (obj_loss = 1.0 or iou)
     accumulate = max(1, np.interp(ni, xi, [1, nbs / total_batch_size]).round())
@@ -131,8 +146,16 @@ def train_loop_set_warmup_phase(
 
 
 def train_loop_update_pbar_loss_result(
-    pbar, i, epoch, epochs, targets, imgs, loss_items, mloss
-):
+    pbar: tqdm.tqdm,
+    i: int,
+    epoch: int,
+    epochs: int,
+    targets: Union[np.ndarray, torch.Tensor],
+    imgs: Union[np.ndarray, torch.Tensor],
+    loss_items: Union[np.ndarray, torch.Tensor],
+    mloss: Union[np.ndarray, torch.Tensor],
+) -> str:
+    """Update prograss bar in train loop."""
     mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses
     mem = "%.3gG" % (
         torch.cuda.memory_reserved() / 1e9 if torch.cuda.is_available() else 0
@@ -149,8 +172,12 @@ def train_loop_update_pbar_loss_result(
     return desc_str
 
 
-def train_loop_get_multi_scale_imgs(imgs, imgsz, gs):
-    sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+def train_loop_get_multi_scale_imgs(
+    imgs: Union[np.ndarray, torch.Tensor], imgsz: float, gs: float
+) -> Union[np.ndarray, torch.Tensor]:
+    """Get multi scale images in train loop."""
+    # size
+    sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # type: ignore
     sf = sz / max(imgs.shape[2:])  # scale factor
     if sf != 1:
         ns = [
@@ -161,31 +188,48 @@ def train_loop_get_multi_scale_imgs(imgs, imgsz, gs):
     return imgs
 
 
-def train_loop_update_image_weight(model, opt, dataset, nc, maps, rank):
+def train_loop_update_image_weight(
+    model: nn.Module,
+    opt: argparse.Namespace,
+    dataset: LoadImagesAndLabels,
+    nc: int,
+    maps: np.ndarray,
+    rank: int,
+) -> LoadImagesAndLabels:
+    """Get dataset with updated image weight."""
     # Update image weights (optional)
     if opt.image_weights:
         # Generate indices
         if rank in [-1, 0]:
-            cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2  # class weights
+            # cw: class weights
+            cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2  # type: ignore
             iw = labels_to_image_weights(
                 dataset.labels, nc=nc, class_weights=cw
             )  # image weights
-            dataset.indices = random.choices(
-                range(dataset.n), weights=iw, k=dataset.n
+            dataset.indices = random.choices(  # type: ignore
+                range(dataset.n), weights=iw, k=dataset.n  # type: ignore
             )  # rand weighted idx
         # Broadcast if DDP
         if rank != -1:
             indices = (
-                torch.tensor(dataset.indices) if rank == 0 else torch.zeros(dataset.n)
+                torch.tensor(dataset.indices) if rank == 0 else torch.zeros(dataset.n)  # type: ignore
             ).int()
             dist.broadcast(indices, 0)
             if rank != 0:
-                dataset.indices = indices.cpu().numpy()
+                dataset.indices = indices.cpu().numpy()  # type: ignore
 
     return dataset
 
 
-def convert_model_by_mode(model, opt, device, cuda, rank, logger):
+def convert_model_by_mode(
+    model: nn.Module,
+    opt: argparse.Namespace,
+    device: Union[torch.device, str],
+    cuda: bool,
+    rank: int,
+    logger: logging.Logger,
+) -> tuple:
+    """Convert the model by mode."""
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
@@ -205,7 +249,18 @@ def convert_model_by_mode(model, opt, device, cuda, rank, logger):
     return model, ema
 
 
-def get_trainloader(train_path, opt, hyp, imgsz, batch_size, gs, rank, nc, n_skip=0):
+def get_trainloader(
+    train_path: str,
+    opt: argparse.Namespace,
+    hyp: dict,
+    imgsz: int,
+    batch_size: int,
+    gs: int,
+    rank: int,
+    nc: int,
+    n_skip: int = 0,
+) -> tuple:
+    """Get trainloader."""
     # Trainloader
     dataloader, dataset = create_dataloader(
         train_path,
@@ -237,7 +292,15 @@ def get_trainloader(train_path, opt, hyp, imgsz, batch_size, gs, rank, nc, n_ski
     return dataloader, dataset, nb
 
 
-def set_model_parameters(model, hyp, dataset, nc, names, device):
+def set_model_parameters(
+    model: Model,
+    hyp: dict,
+    dataset: LoadImagesAndLabels,
+    nc: int,
+    names: list,
+    device: Union[torch.device, str],
+) -> tuple:
+    """Set model parameters."""
     # Model parameters
     hyp["cls"] *= nc / 80.0  # scale coco-tuned hyp['cls'] to current dataset
     model.nc = nc  # attach number of classes to model
@@ -251,7 +314,8 @@ def set_model_parameters(model, hyp, dataset, nc, names, device):
     return model, hyp
 
 
-def init_scheduler(optimizer, hyp, epochs):
+def init_scheduler(optimizer: torch.optim.Optimizer, hyp: dict, epochs: int) -> tuple:
+    """Initialize scheduler."""
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
     lf = (
@@ -263,7 +327,8 @@ def init_scheduler(optimizer, hyp, epochs):
     return scheduler, lf
 
 
-def freeze_parameters(model, freeze=("",)):
+def freeze_parameters(model: nn.Module, freeze: tuple = ("",)) -> None:
+    """Freeze the model parameters."""
     # Freeze
     if any(freeze):
         for k, v in model.named_parameters():
@@ -272,17 +337,20 @@ def freeze_parameters(model, freeze=("",)):
                 v.requires_grad = False
 
 
-def init_optimizer(model, hyp, opt):
+def init_optimizer(model: nn.Module, hyp: dict, opt: argparse.Namespace) -> tuple:
+    """Initialize model optimizer."""
     pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
+    for _, v in model.named_modules():
         if hasattr(v, "bias") and isinstance(v.bias, torch.Tensor):
             pg2.append(v.bias)
         if isinstance(v, nn.BatchNorm2d):
             pg0.append(v.weight)
         elif hasattr(v, "weight") and isinstance(v.weight, torch.Tensor):
             pg1.append(v.weight)
-    for k, v in model.named_parameters():
+    for _, v in model.named_parameters():
         v.requires_grad = True
+
+    optimizer: optim.Optimizer
 
     if opt.adam:
         optimizer = optim.Adam(
@@ -301,7 +369,10 @@ def init_optimizer(model, hyp, opt):
     return optimizer, pg0, pg1, pg2
 
 
-def strip_optimizer_in_checkpoints(opt, log_dir, wdir, results_file_path):
+def strip_optimizer_in_checkpoints(
+    opt: argparse.Namespace, log_dir: PosixPath, wdir: PosixPath, results_file_path: str
+) -> None:
+    """Strip optimizer in checkpoints."""
     # Strip optimizers
     n = opt.name if opt.name.isnumeric() else ""
     fresults, flast, fbest = (
@@ -313,7 +384,8 @@ def strip_optimizer_in_checkpoints(opt, log_dir, wdir, results_file_path):
         [wdir / "last.pt", wdir / "best.pt", results_file_path],
         [flast, fbest, fresults],
     ):
-        if os.path.exists(f1):
-            os.rename(f1, f2)  # rename
+        if os.path.exists(f1):  # type: ignore
+            # rename
+            os.rename(f1, f2)  # type: ignore
             if str(f2).endswith(".pt"):  # is *.pt
                 strip_optimizer(f2)  # strip optimizer

@@ -1,16 +1,19 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import argparse
 import logging
 import math
 import sys
-from collections import OrderedDict
 from copy import deepcopy
 from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
-
-sys.path.append("./")  # to run '$ python *.py' files in subdirectories
-logger = logging.getLogger(__name__)
 
 from models.common import (NMS, SPP, Bottleneck, BottleneckCSP, Concat, Conv,
                            DWConv, Focus, SeparableConv, make_divisible_tf)
@@ -26,12 +29,22 @@ from utils.torch_utils import (fuse_conv_and_bn, initialize_weights,
                                model_info, scale_img, select_device,
                                time_synchronized)
 
+sys.path.append("./")  # to run '$ python *.py' files in subdirectories
+logger = logging.getLogger(__name__)
+
 
 class Detect(nn.Module):
-    stride = None  # strides computed during initializing the model
+    """Detection layer class."""
+
+    stride: Union[
+        List[int], Tuple[int, int], torch.Tensor
+    ] = []  # strides computed during initializing the model
     export = False  # onnx export
 
-    def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+    def __init__(
+        self, nc: int = 80, anchors: tuple = (), ch: tuple = ()
+    ) -> None:  # detection layer
+        """Initialize Detect class."""
         super(Detect, self).__init__()
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
@@ -47,7 +60,10 @@ class Detect(nn.Module):
             nn.Conv2d(x, self.no * self.na, 1) for x in ch
         )  # output conv
 
-    def forward(self, x):
+    def forward(
+        self, x: torch.Tensor
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+        """Feed forward."""
         # x = x.copy()  # for profiling
         preds = []  # inference output
         for i in range(self.nl):
@@ -72,7 +88,7 @@ class Detect(nn.Module):
                 t0 = (
                     y[..., 0:2] * 2.0 - 0.5 + self.grid[i].to(x[i].device)
                 ) * self.stride[i]
-                t1 = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]
+                t1 = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # type: ignore
                 box_xyxy = self._xywh2xyxy(t0, t1).view(bs, -1, 4)
                 score = y[..., 4:].float().view(bs, -1, self.nc + 1)
 
@@ -86,12 +102,14 @@ class Detect(nn.Module):
             return (torch.cat(preds, 1), x)
 
     @staticmethod
-    def _make_grid(nx=20, ny=20):
+    def _make_grid(nx: int = 20, ny: int = 20) -> torch.Tensor:
+        """Make grid."""
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
     @staticmethod
-    def _xywh2xyxy(t0, t1):
+    def _xywh2xyxy(t0: Union[torch.Tensor], t1: Union[torch.Tensor]) -> torch.Tensor:
+        """Convert [x, y, w, h] to [x1, y1, x2, y2]."""
         # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
         t = t1 / 2
         x0 = t0 - t
@@ -111,9 +129,18 @@ class Model(nn.Module):
     """
 
     def __init__(
-        self, cfg="yolov5s.yaml", ch=3, nc=None
-    ):  # model, input channels, number of classes
+        self,
+        cfg: Union[str, dict] = "yolov5s.yaml",
+        ch: int = 3,
+        nc: Optional[int] = None,
+    ) -> None:  # model, input channels, number of classes
+        """Initialize YOLO OD model."""
         super(Model, self).__init__()
+        self.names: List[str] = []
+        self.hyp: dict = {}
+        self.gr: float = 0.0
+        self.stride: torch.Tensor
+        self.nc: int
 
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
@@ -151,8 +178,11 @@ class Model(nn.Module):
         self.info(True)
         print("")
 
-    def forward(self, x, augment=False, profile=False):
-        """
+    def forward(
+        self, x: torch.Tensor, augment: bool = False, profile: bool = False
+    ) -> Union[torch.Tensor, tuple]:
+        """Feed forward.
+
         Args:
             x (torch.FloatTensor):
             augment (bool):
@@ -160,7 +190,6 @@ class Model(nn.Module):
 
         Returns:
             list of torch.Tensors of shape...
-
         """
         if augment:
             img_size = x.shape[-2:]  # height, width
@@ -181,21 +210,22 @@ class Model(nn.Module):
         else:
             return self.forward_once(x, profile)  # single-scale inference, train
 
-    def forward_once(self, x, profile=False):
-        y, dt = [], []  # outputs
-        cnt = 0
+    def forward_once(
+        self, x: torch.Tensor, profile: bool = False
+    ) -> Union[torch.Tensor, tuple]:
+        """Feed forward once."""
+        # outputs
+        y: list = []
+        dt: list = []
+        # cnt = 0
         # create profile data
         if profile:
             import collections
 
             prof_data = collections.defaultdict(list)
             self.total_params = 0
-        for i, m in enumerate(self.model):
+        for _, m in enumerate(self.model):
             if m.f != -1:  # if not from previous layer
-                ### HS: EXAMPLE ##################################################
-                ## Case : m.f = [-1, 6]
-                ## x = [y[-1], y[6]] # list of tensors
-                ##################################################################
                 if not isinstance(m.f, int):
                     x = (
                         y[m.f]
@@ -211,7 +241,7 @@ class Model(nn.Module):
                     o = (
                         thop.profile(m, inputs=(profile_x,), verbose=False)[0] / 1e9 * 2
                     )  # FLOPS approx macs*2
-                except:
+                except Exception:
                     o = 0
                 t = time_synchronized()
                 for _ in range(self.run_count):
@@ -227,23 +257,9 @@ class Model(nn.Module):
 
             # old_x = x
             x = m(x)  # run
-            ### HS: EXAMPLE ##################################################
-            ## Case: self.save = [2, ...] and m.i == 2
-            ## y = [None, None, x]
-            ## Eventually, y = [None, None, x_2, ...] after `for` loop on `m`
-            ## where x_2 is the output of
-            ##################################################################
-            # print('idx:', i, ' f:', m.f, 'input:', old_x.shape if hasattr(old_x, 'shape') else list(map(lambda x: x.shape, old_x)), 'output:', x.shape if hasattr(x, 'shape') else list(map(lambda x: x.shape, x)))
-            ### HS: EXAMPLE ##################################################
-            ## Case: self.save = [2, ...] and m.i == 2
-            ## y = [None, None, x]
-            ## Eventually, y = [None, None, x_2, ...] after `for` loop on `m`
-            ## where x_2 is the output of
-            ##################################################################
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
-            import numpy as np
             import pandas as pd
             from tabulate import tabulate
 
@@ -257,15 +273,16 @@ class Model(nn.Module):
             return x, df
         return x
 
-    def run_profile(self, x: torch.Tensor):
+    def run_profile(self, x: torch.Tensor) -> Union[torch.Tensor, tuple]:
         """Run profile and return total params."""
         return self.forward_once(x, profile=True)
 
-    def set_profile_iteration(self, i: int):
+    def set_profile_iteration(self, i: int) -> None:
         """Set total profile iteration to calculate average runtime."""
         self.run_count = i
 
-    def copy_tensor(self, x):
+    def copy_tensor(self, x: torch.Tensor) -> torch.Tensor:
+        """Copy the tensor."""
         device = x.device if hasattr(x, "device") else x[0].device
         if isinstance(x, list):
             cp_x = []
@@ -277,9 +294,8 @@ class Model(nn.Module):
             cp_x.to(device)
         return cp_x
 
-    def _initialize_biases(
-        self, cf=None
-    ):  # initialize biases into Detect(), cf is class frequency
+    def _initialize_biases(self, cf: Optional[torch.Tensor] = None) -> None:
+        """Initialize biases into Detect(), cf is class frequency."""
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
         for mi, s in zip(m.m, m.stride):  # from
@@ -294,7 +310,8 @@ class Model(nn.Module):
             )  # cls
             mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
-    def _print_biases(self):
+    def _print_biases(self) -> None:
+        """Print biases."""
         m = self.model[-1]  # Detect() module
         for mi in m.m:  # from
             b = mi.bias.detach().view(m.na, -1).T  # conv.bias(255) to (3,85)
@@ -308,31 +325,39 @@ class Model(nn.Module):
     #         if type(m) is Bottleneck:
     #             print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
-    def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
+    def fuse(self) -> nn.Module:  # fuse model Conv2d() + BatchNorm2d() layers
+        """Fuse layers."""
         print("Fusing layers... ")
         for m in self.model.modules():
             if type(m) is Conv and hasattr(m, "bn"):
                 m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability
-                m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
+                # update conv
+                m.conv = fuse_conv_and_bn(m.conv, m.bn)  # type: ignore
                 delattr(m, "bn")  # remove batchnorm
-                m.forward = m.fuseforward  # update forward
+                m.forward = m.fuseforward  # type: ignore
         self.info()
         return self
 
-    def add_nms(self):  # fuse model Conv2d() + BatchNorm2d() layers
+    def add_nms(self) -> nn.Module:
+        """Add non max suppression."""
         if type(self.model[-1]) is not NMS:  # if missing NMS
             print("Adding NMS module... ")
             m = NMS()  # module
-            m.f = -1  # from
-            m.i = self.model[-1].i + 1  # index
+            # from
+            m.f = -1  # type: ignore
+            # index
+            m.i = self.model[-1].i + 1  # type: ignore
             self.model.add_module(name="%s" % m.i, module=m)  # add
         return self
 
-    def info(self, verbose=False):  # print model information
+    def info(self, verbose: bool = False) -> None:  # print model information
+        """Print model informations."""
         model_info(self, verbose)
 
 
-def parse_model(d, ch):  # model_dict, input_channels(3)
+def parse_model(
+    d: dict, ch: list
+) -> Tuple[nn.Sequential, list]:  # model_dict, input_channels(3)
     """Parse model from model config.
 
     Args:
@@ -374,26 +399,16 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors
     )  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
-
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    # layers, savelist, ch out
+    layers, save, c2 = [], [], ch[-1]  # type: ignore
     for i, (f, n, m, args) in enumerate(
         d["backbone"] + d["head"]
     ):  # from, number, module, args
         m = eval(m) if isinstance(m, str) else m  # NOTE: from now on, m is a class!!
         for j, a in enumerate(args):
             try:
-                ### HS: EXAMPLE ##################################################
-                ## # Detect layer: args = ['nc', 'anchors']
-                ## # after eval strings:
-                ## args = [nc, anchors]
-                ##      = [80, [[10, ...], [30, ...], [116, ...]] # default YOLO
-                ## # Upsample layer: args = ['None', 2, 'nearest']
-                ## # after eval strings:
-                ## args = [None, 2, 'nearest'
-                ## # NOTE: `nearest` is not defined.
-                ##################################################################
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except:
+            except Exception:
                 pass
 
         n = max(round(n * gd), 1) if n > 1 else n  # depth gain
@@ -418,9 +433,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             #     c2 = int(ch[1] * ex ** e)
             # if m != Focus:
 
-            #########################################################
-            ## HS: why require divisible by 8 ???
-            #########################################################
             c2 = make_divisible(c2 * gw, 8) if c2 != no else c2
 
             # Experimental
@@ -434,12 +446,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
             args = [c1, c2, *args[1:]]
             if m in [BottleneckCSP, C3]:
-                ### HS: EXAMPLE #################################################
-                ## #Case of c1=128, [-1, 3, 'BottleneckCSP', [256, False]]:
-                ## args == [128, 256, False]
-                ## >>> args.insert(2, 3);print(args)
-                ## [128, 256, 3, False]
-                #################################################################
                 args.insert(2, n)
                 n = 1
         elif m is GhostBottleneck:  # args: k, t, c, SE, s
@@ -457,14 +463,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         elif m is nn.BatchNorm2d:
             args = [ch[f + 1] if f != -1 else ch[-1]]
         elif m is Concat:
-            ### HS: EXAMPLE ##################################################
-            ## f, n, m, args = [-1, 6], 1, 'Concat, [1]
-            ## c2 = sum([ch[-1], ch[6 + 1]])
-            ## NOTE: WHY `x + 1`?
-            ##     For the idx `x` layer in `d['backbone'] + d['head']`:
-            ##         input_channels : ch[x]
-            ##         output_channels : ch[x + 1]
-            ##################################################################
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
         elif m is FuseSum:
             c1 = c2 = ch[f[0]]
@@ -475,31 +473,14 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             if isinstance(f, int):  # BiFPN output case
                 args.append([ch[f + 1]] * 5)
             else:
-                ### HS: EXAMPLE ##################################################
-                ## f, n, m, args = [[17, 20, 23], 1, 'Detect', ['nc', 'anchors']]
-                ## args = ['nc', 'anchors', ch[17 + 1], ch[20 + 1], ch[23 + 1]]
-                ##################################################################
                 args.append([ch[x + 1] for x in f])
                 if isinstance(args[1], int):  # number of anchors
-                    ### HS: EXAMPLE ##############################################
-                    ## f, n, m, args = [[17, 20, 23], 1, 'Detect', ['nc', 3]]
-                    ## # i.e., 3 anchors
-                    ## args = ['nc', 3, ch[17 + 1], ch[20 + 1], ch[23 + 1]]
-                    ## args[1] = [list(range(3 * 2)] * len([17, 20, 23]
-                    ## args[1] = [0, ..., 5, 0, ..., 5, 0, ..., 5]
-                    ## args = ['nc',[0, ..., 5, 0, ..., 5, 0, ..., 5],ch[18],ch[21],ch[24]]
-                    ##############################################################
                     args[1] = [list(range(args[1] * 2))] * len(f)
         else:
             c2 = ch[f]
         m_ = (
             nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)
         )  # module
-        ### HS: EXAMPLE ######################################################
-        ## str(NMS) = "<class 'models.common.NMS'>"
-        ## str(NMS)[8, -2] = "models.common.NMS"
-        ## Couldn't find any example containig '__main__.' !!
-        ######################################################################
         t = str(m)[8:-2].replace("__main__.", "")  # module type
         np = sum([param.numel() for param in m_.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = (
@@ -509,12 +490,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             np,
         )  # attach index, 'from' index, type, number params
         logger.info("%3s%18s%3s%10.0f  %-40s%-30s" % (i, f, n, np, t, args))  # print
-        ### HS: EXAMPLE ######################################################
-        ## case of f = [-1, 6]:
-        ## save = save + [6 % i]
-        ## WHAT IS THIS FOR?? WHENEVER `i > x`, `x % i == x`, BEING EXPECTED
-        ## TO BE TRUE ASSUMING THAT WE WRITE CONFIG YAML FILE THOUGHTFULLY.
-        ######################################################################
         save.extend(
             x % i for x in ([f] if isinstance(f, int) else f) if x != -1
         )  # append to savelist

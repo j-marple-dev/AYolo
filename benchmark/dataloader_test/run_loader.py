@@ -1,19 +1,14 @@
+"""Module for run dataloader."""
 import argparse
 import os
-import sys
 from time import monotonic
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
 import yaml
+from dali import DALIYOLOIterator, SimpleObjectDetectionPipeline
 from tqdm import tqdm
-
-sys.path.append("/usr/src/yolo")  # to run subdirecotires
-from typing import Any, Dict
-
-from dali import (DALICOCOIterator, DALIYOLOIterator,
-                  SimpleObjectDetectionPipeline)
-from nvidia.dali.plugin.pytorch import DALIGenericIterator
 
 from benchmark.dataloader_test.trt_wrapper import TrtWrapper
 from benchmark.dataloader_test.util.plot import (result_plot,
@@ -24,16 +19,21 @@ from utils.general import check_img_size, non_max_suppression
 from utils.torch_utils import select_device
 from utils.wandb_utils import read_opt_yaml
 
+# def select_dataloder(dl_type, dl_config, device):
+#     """Initialize dataloder."""
+#     return 0
 
-def select_dataloder(dl_type, dl_config, device):
-    """Initialize dataloder."""
-    return 0
 
-
-def select_model(exp_dir, m_type, data_type, dl_config, device, torch_input=True):
+def select_model(
+    exp_dir: str,
+    m_type: Optional[str],
+    data_type: Optional[str],
+    dl_config: dict,
+    device: Optional[Union[torch.device, str]],
+    torch_input: bool = True,
+) -> Union[torch.nn.Module, TrtWrapper]:
+    """Select model for test dataloader."""
     # params from dl_config
-    batch_size = dl_config["batch_size"]
-    img_size = dl_config["imgsz"]
     if m_type == "torch":
         # file config
         model_path = os.path.join(exp_dir, "weights", "best.pt")
@@ -48,7 +48,7 @@ def select_model(exp_dir, m_type, data_type, dl_config, device, torch_input=True
         model = TrtWrapper(
             exp_dir,
             data_type,
-            dataloader_config["batch_size"],
+            dl_config["batch_size"],
             device=device,
             torch_input=torch_input,
         )
@@ -63,7 +63,8 @@ def torch_test(
     dataloader_config: Dict[Any, Any],
     device: torch.device,
     plot: bool = False,
-):
+) -> None:
+    """Test pytorch dataloader."""
     print(f"[Torchdl, {model_type}, {data_type}] Inference Start")
     runtime_start = monotonic()
 
@@ -75,7 +76,7 @@ def torch_test(
     # Check imgsize
     dataloader = create_dataloader(**dataloader_config)[0]
     load_time = monotonic() - runtime_start
-    for batch_i, (img, targets, _, _) in enumerate(tqdm(dataloader)):
+    for _batch_i, (img, targets, _, _) in enumerate(tqdm(dataloader)):
         img = img.to(device, non_blocking=True)
         img = torch.div(img, 255.0)  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
@@ -108,7 +109,8 @@ def dali_test_predonly(
     dataloader_config: Dict[Any, Any],
     device: torch.device,
     plot: bool = False,
-):
+) -> None:
+    """Test Dali dataloader only prediction(no post-process)."""
     print(f"[Pred Only][Dalidl, {model_type}, {data_type}] Inference Start")
     runtime_start = monotonic()
 
@@ -127,7 +129,7 @@ def dali_test_predonly(
     num_iter = 6750 // batch_size + 1
     load_time = monotonic() - runtime_start
 
-    for i in tqdm(range(num_iter)):
+    for _ in tqdm(range(num_iter)):
         pipe_out = pipe.run()
         # Pipe_out: (dali.backend_impl.TensorListGPU, dali.backend_impl.TensotListGPU, dali.backend_impl.TensorListGPU) : imgs, bboxes, labels
         img = pipe_out[0]  # datas(dali.backend_impl.TensorGPU)
@@ -163,7 +165,8 @@ def dali_test(
     dataloader_config: Dict[Any, Any],
     device: torch.device,
     plot: bool = False,
-):
+) -> None:
+    """Test dali dataloader."""
     print(f"[Dalidl, {model_type}, {data_type}] Inference Start")
     runtime_start = monotonic()
 
@@ -177,11 +180,15 @@ def dali_test(
         batch_size=batch_size, num_threads=dataloader_config["workers"], device_id=0
     )
     pipe.build()
-    test_run = pipe.schedule_run(), pipe.share_outputs(), pipe.release_outputs()
+
+    pipe.schedule_run()
+    pipe.share_outputs()
+    pipe.release_outputs()
+
     dataloader = DALIYOLOIterator(pipe, size=6750)  # fix size
 
     load_time = monotonic() - runtime_start
-    for batch_i, data in enumerate(tqdm(dataloader)):
+    for _batch_i, data in enumerate(tqdm(dataloader)):
         img, targets = data[0][0][0], data[0][1][0]
         img = img.to(device)
         targets = targets.to(device)
@@ -271,9 +278,11 @@ if __name__ == "__main__":
     # Device
     device = select_device(opt.device, batch_size=opt.batch_size)
 
-    # Initialize dataloader config
     class opt_dl:
-        def __init__(self):
+        """Dataloader config class."""
+
+        def __init__(self) -> None:
+            """Initialize dataloader config."""
             self.single_cls = True
 
     # Notice stride is hardcoded

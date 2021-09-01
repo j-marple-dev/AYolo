@@ -1,43 +1,55 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import argparse
 import os
 import sys
 import time
+from typing import List, Optional, Union
 
 import numpy as np
-import pycuda.autoinit
+import pycuda.autoinit  # noqa: F401
 import pycuda.driver as cuda
 import tensorrt as trt
 import torch
+import torch.nn as nn
 import torchvision
 import yaml
 
-sys.path.append(os.getcwd())
-
 from models.experimental import attempt_load
+from utils.general import box_iou
 from utils.torch_utils import select_device
 from utils.wandb_utils import load_model_from_wandb
+
+sys.path.append(os.getcwd())
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
 
 
-def GiB(val):
+def GiB(val: int) -> int:
+    """Return GiB."""
     return val * 1 << 30
 
 
 def build_engine(
-    onnx_path,
-    engine_path,
-    dtype,
-    calib_imgs_path="/usr/src/trt/yolov5/build/calib_imgs",
-    conf_thres=0.1,
-    iou_thres=0.6,
-    top_k=512,
-    keep_top_k=100,
-    img_size=[480, 480],
-    batch_size=16,
-    gpu_mem=8,
-):
+    onnx_path: str,
+    engine_path: str,
+    dtype: str,
+    calib_imgs_path: str = "/usr/src/trt/yolov5/build/calib_imgs",
+    conf_thres: float = 0.1,
+    iou_thres: float = 0.6,
+    top_k: int = 512,
+    keep_top_k: int = 100,
+    img_size: Optional[List[int]] = None,
+    batch_size: int = 16,
+    gpu_mem: int = 8,
+) -> trt.ICudaEngine:
+    """Build engine for tensorRT."""
+    if not img_size:
+        img_size = [480, 480]
     trt.init_libnvinfer_plugins(None, "")
 
     # if os.path.exists(engine_path):
@@ -56,7 +68,8 @@ def build_engine(
             if dtype == "int8":
                 print("int8")
                 bin_file = os.path.join(
-                    engine_path.rsplit(os.path.sep, 1)[0], f"calib_best.bin"
+                    engine_path.rsplit(os.path.sep, 1)[0],
+                    "calib_best.bin",  # TODO: parameterize the file name
                 )
                 from calibrator import YOLOEntropyCalibrator
 
@@ -83,7 +96,8 @@ def build_engine(
             if dtype == "int8":
                 print("int8")
                 bin_file = os.path.join(
-                    engine_path.rsplit(os.path.sep, 1)[0], f"calib_best.bin"
+                    engine_path.rsplit(os.path.sep, 1)[0],
+                    "calib_best.bin",  # TODO: parameterize the file name
                 )
                 from calibrator import YOLOEntropyCalibrator
 
@@ -146,32 +160,32 @@ def build_engine(
         fc = []
         fc.append(
             trt.PluginField(
-                "shareLocation", np.array([1], dtype=np.int), trt.PluginFieldType.INT32
+                "shareLocation", np.array([1], dtype=int), trt.PluginFieldType.INT32
             )
         )
         fc.append(
             trt.PluginField(
                 "backgroundLabelId",
-                np.array([-1], dtype=np.int),
+                np.array([-1], dtype=int),
                 trt.PluginFieldType.INT32,
             )
         )
         fc.append(
             trt.PluginField(
                 "numClasses",
-                np.array([num_classes], dtype=np.int),
+                np.array([num_classes], dtype=int),
                 trt.PluginFieldType.INT32,
             )
         )
         fc.append(
             trt.PluginField(
-                "topK", np.array([top_k], dtype=np.int), trt.PluginFieldType.INT32
+                "topK", np.array([top_k], dtype=int), trt.PluginFieldType.INT32
             )
         )
         fc.append(
             trt.PluginField(
                 "keepTopK",
-                np.array([keep_top_k], dtype=np.int),
+                np.array([keep_top_k], dtype=int),
                 trt.PluginFieldType.INT32,
             )
         )
@@ -191,12 +205,12 @@ def build_engine(
         )
         fc.append(
             trt.PluginField(
-                "isNormalized", np.array([0], dtype=np.int), trt.PluginFieldType.INT32
+                "isNormalized", np.array([0], dtype=int), trt.PluginFieldType.INT32
             )
         )
         fc.append(
             trt.PluginField(
-                "clipBoxes", np.array([0], dtype=np.int), trt.PluginFieldType.INT32
+                "clipBoxes", np.array([0], dtype=int), trt.PluginFieldType.INT32
             )
         )
 
@@ -222,7 +236,13 @@ def build_engine(
         return engine
 
 
-def profile_trt(engine, batch_size, num_warmups=10, num_iters=100):
+def profile_trt(
+    engine: trt.ICudaEngine,
+    batch_size: int,
+    num_warmups: int = 10,
+    num_iters: int = 100,
+) -> List[np.ndarray]:
+    """Profile tensorRT engine."""
     assert engine is not None
     # input_img_array = np.array([input_img] * batch_size)
     input_img_array = np.random.rand(batch_size, 3, 480, 480)
@@ -295,20 +315,30 @@ def profile_trt(engine, batch_size, num_warmups=10, num_iters=100):
         return [np.concatenate([boxes, scores, classes], -1)]
 
 
-def allocate_buffers(engine, is_explicit_batch=False, dynamic_shapes=[]):
+def allocate_buffers(
+    engine: trt.ICudaEngine,
+    is_explicit_batch: bool = False,
+    dynamic_shapes: Optional[list] = None,
+) -> tuple:
+    """Allocate buffers."""
+    if dynamic_shapes is None:
+        dynamic_shapes = []
     inputs = []
     outputs = []
     bindings = []
 
     class HostDeviceMem(object):
-        def __init__(self, host_mem, device_mem):
+        """Host device memory class."""
+
+        def __init__(self, host_mem: int, device_mem: int) -> None:
+            """Initialize HostDeviceMem class."""
             self.host = host_mem
             self.device = device_mem
 
-        def __str__(self):
+        def __str__(self) -> str:
             return "Host:\n" + str(self.host) + "\nDevice:\n" + str(self.device)
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return self.__str__()
 
     for binding in engine:
@@ -334,18 +364,22 @@ def allocate_buffers(engine, is_explicit_batch=False, dynamic_shapes=[]):
 
 
 def profile_torch(
-    model,
-    using_half,
-    batch_size,
-    num_warmups=10,
-    num_iters=100,
-    conf_thres=0.4,
-    iou_thres=0.5,
-    device=None,
-):
-    device = select_device(device)
+    model: nn.Module,
+    using_half: bool,
+    batch_size: int,
+    num_warmups: int = 10,
+    num_iters: int = 100,
+    conf_thres: float = 0.4,
+    iou_thres: float = 0.5,
+    device: Optional[str] = None,
+) -> Optional[list]:
+    """Profile torch model."""
+    if device:
+        torch_device = select_device(device)
+    else:
+        torch_device = select_device("")
 
-    model.to(device)
+    model.to(torch_device)
 
     total_duration = 0.0
     total_compute_duration = 0.0
@@ -359,7 +393,7 @@ def profile_torch(
     for iteration in range(num_iters):
         pre_t = time.time()
         # set host data
-        img = torch.from_numpy(input_img_array).float().to(device)
+        img = torch.from_numpy(input_img_array).float().to(torch_device)
         if using_half:
             img = img.half()
         start_t = time.time()
@@ -388,7 +422,7 @@ def profile_torch(
     print("avg pre time: {}".format(total_pre_duration / (num_iters - num_warmups)))
     print("avg post time: {}".format(total_post_duration / (num_iters - num_warmups)))
 
-    if output[0] != None:
+    if output[0] is not None:
         return [output[0].cpu().numpy()]
     else:
         return None
@@ -396,9 +430,15 @@ def profile_torch(
 
 #  different from yolov5/utils/non_max_suppression, xywh2xyxy(x[:, :4]) is no longer needed (contained in Detect())
 def non_max_suppression(
-    prediction, conf_thres=0.1, iou_thres=0.6, merge=False, classes=None, agnostic=False
-):
-    """Performs Non-Maximum Suppression (NMS) on inference results
+    prediction: torch.Tensor,
+    conf_thres: float = 0.1,
+    iou_thres: float = 0.6,
+    merge: bool = False,
+    classes: Union[np.ndarray, list] = None,
+    agnostic: bool = False,
+) -> Union[tuple, torch.Tensor, np.ndarray, list]:
+    """Perform Non-Maximum Suppression (NMS) on inference results.
+
     Returns:
          detections with shape: nx6 (x1, y1, x2, y2, conf, cls)
     """
@@ -409,7 +449,8 @@ def non_max_suppression(
     xc = prediction[..., 4] > conf_thres  # candidates
 
     # Settings
-    min_wh, max_wh = 2, 4096  # (pixels) minimum and maximum box width and height
+    # (pixels) minimum and maximum box width and height
+    min_wh, max_wh = 2, 4096  # noqa: F841
     max_det = 300  # maximum number of detections per image
     time_limit = 10.0  # seconds to quit after
     redundant = True  # require redundant detections
@@ -471,7 +512,7 @@ def non_max_suppression(
                 )  # merged boxes
                 if redundant:
                     i = i[iou.sum(1) > 1]  # require redundancy
-            except:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
+            except Exception:  # possible CUDA error https://github.com/ultralytics/yolov3/issues/1139
                 print(x, i, x.shape, i.shape)
                 pass
 
@@ -549,11 +590,11 @@ if __name__ == "__main__":
         calib_imgs_path=opt.calib_imgs,
         gpu_mem=opt.gpu_mem,
     )
-    with open(engine_file, "wb") as f:
-        f.write(trt_engine.serialize())
+    with open(engine_file, "wb") as wb_f:
+        wb_f.write(trt_engine.serialize())
 
-    with open(engine_file, "rb") as f, trt.Runtime(TRT_LOGGER) as runtime:
-        trt_engine = runtime.deserialize_cuda_engine(f.read())
+    with open(engine_file, "rb") as rb_f, trt.Runtime(TRT_LOGGER) as runtime:
+        trt_engine = runtime.deserialize_cuda_engine(rb_f.read())
 
     trt_config_file = os.path.join(opt.expdir, "trt", "trt_config.yaml")
     with open(trt_config_file, "w") as f:
@@ -561,7 +602,7 @@ if __name__ == "__main__":
 
     profile_trt(trt_engine, torch_config["Dataset"]["batch_size"], 10, opt.profile_iter)
 
-    if opt.dtype is "fp16":
+    if opt.dtype == "fp16":
         half = True
     else:
         half = False

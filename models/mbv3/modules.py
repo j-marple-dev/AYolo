@@ -1,3 +1,11 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
+from typing import Optional
+
+import torch
 import torch.nn as nn
 
 from models.common import make_divisible_tf
@@ -9,7 +17,7 @@ class InvertedResidualv3:
     Note: This could be implemented as function, but intended to follow uppercase convention.
     """
 
-    def __new__(cls, ic, width_multiple, k, t, c, use_se, use_hs, s):
+    def __new__(cls, ic: int, width_multiple: float, k: int, t: int, c: int, use_se: bool, use_hs: bool, s: int) -> nn.Sequential:  # type: ignore
         """Create Inverted Residual block mobilenet v3 version."""
         layers = []
         input_channel = ic
@@ -28,7 +36,7 @@ class InvertedResidualv3:
         )
         return nn.Sequential(*layers)
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Not called."""
         pass
 
@@ -40,7 +48,17 @@ class InvertedResidual(nn.Module):
         https://github.com/d-li14/mobilenetv3.pytorch/blob/master/mobilenetv3.py
     """
 
-    def __init__(self, inp, hidden_dim, oup, kernel_size, stride, use_se, use_hs):
+    def __init__(
+        self,
+        inp: int,
+        hidden_dim: int,
+        oup: int,
+        kernel_size: int,
+        stride: int,
+        use_se: bool,
+        use_hs: bool,
+    ) -> None:
+        """Initialize InvertedResidual class."""
         super(InvertedResidual, self).__init__()
         assert stride in [1, 2]
 
@@ -91,7 +109,8 @@ class InvertedResidual(nn.Module):
                 nn.BatchNorm2d(oup),
             )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         if self.identity:
             return x + self.conv(x)
         else:
@@ -101,7 +120,8 @@ class InvertedResidual(nn.Module):
 class SqueezeExcitation(nn.Module):
     """Squeeze-Excitation layer used in mbv3(hard-sigmoid)."""
 
-    def __init__(self, in_planes, reduced_dim=None):
+    def __init__(self, in_planes: int, reduced_dim: Optional[int] = None) -> None:
+        """Initialize SqueezeExcitation class."""
         super(SqueezeExcitation, self).__init__()
         if not reduced_dim:
             reduced_dim = make_divisible_tf(in_planes // 4, 8)
@@ -113,5 +133,6 @@ class SqueezeExcitation(nn.Module):
             nn.Hardsigmoid(),
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Feed forward."""
         return x * self.se(x)

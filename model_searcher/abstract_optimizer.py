@@ -4,6 +4,8 @@
 - Contact: limjk@jmarple.ai
 """
 
+import argparse
+import logging
 import math
 import platform
 import test  # import test.py to get mAP after each epoch
@@ -11,16 +13,29 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from argparse import Namespace
-from typing import Dict, Union
+from typing import Any, Dict, Optional, Union
 
+import numpy as np
 import optuna
+import torch
 import torch.utils.data
 from torch.cuda import amp
 from tqdm import tqdm
 
 from model_searcher.optuna_utils import create_load_study_with_config
-from model_searcher.train_functions import *
+from model_searcher.train_functions import (convert_model_by_mode,
+                                            freeze_parameters, get_trainloader,
+                                            init_optimizer, init_scheduler,
+                                            init_train_configuration,
+                                            set_model_parameters,
+                                            strip_optimizer_in_checkpoints,
+                                            train_loop_get_multi_scale_imgs,
+                                            train_loop_save_model,
+                                            train_loop_set_warmup_phase,
+                                            train_loop_update_image_weight,
+                                            train_loop_update_pbar_loss_result)
 from models.yolo import Model
+from utils.datasets import create_dataloader
 from utils.general import (check_anchors, check_img_size, compute_loss,
                            fitness, increment_dir, set_logging_detail)
 from utils.torch_utils import select_device
@@ -30,7 +45,14 @@ from utils.wandb_utils import load_model_from_wandb
 class AbstractOptimizer(ABC):
     """Abstract Optuna Optimizer for object detection model."""
 
-    def __init__(self, n_trials: int = 300, test_step: int = 1, prune=True, n_skip=0):
+    def __init__(
+        self,
+        n_trials: int = 300,
+        test_step: int = 1,
+        prune: bool = True,
+        n_skip: int = 0,
+    ) -> None:
+        """Initialize AbstractOptimizer class."""
         self.logger = logging.getLogger(self.__class__.__name__)
         set_logging_detail(0)
         self.test_step = test_step
@@ -38,7 +60,14 @@ class AbstractOptimizer(ABC):
         self.prune = prune
         self.n_skip = n_skip
 
-    def train(self, hyp, opt, device, trial):
+    def train(
+        self,
+        hyp: dict,
+        opt: argparse.Namespace,
+        device: torch.device,
+        trial: optuna.trial.Trial,
+    ) -> tuple:
+        """Train model with optuna."""
         self.log(f"Hyperparameters {hyp}")
         (
             log_dir,
@@ -60,7 +89,7 @@ class AbstractOptimizer(ABC):
         # Model (no-pretrained)
         if isinstance(opt.cfg, str):
             model, _ = load_model_from_wandb(opt.cfg, device=device)
-            for k, v in model.named_parameters():
+            for _, v in model.named_parameters():
                 v.requires_grad = True
         else:
             model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
@@ -82,7 +111,9 @@ class AbstractOptimizer(ABC):
         del pg0, pg1, pg2
 
         scheduler, lf = init_scheduler(optimizer, hyp, epochs)
-        start_epoch, best_fitness = 0, 0.0
+        # start_epoch, best_fitness = 0, 0.0
+        start_epoch = 0
+        best_fitness: Union[float, np.ndarray] = 0.0
 
         # Image sizes
         gs = int(max(model.stride))  # grid size (max stride)
@@ -124,10 +155,10 @@ class AbstractOptimizer(ABC):
         # Start training
         t0 = time.time()
         nw = max(
-            round(hyp["warmup_epochs"] * nb), 1e3
+            round(hyp["warmup_epochs"] * nb), 1000
         )  # number of warmup iterations, max(3 epochs, 1k iterations)
         maps = np.zeros(nc)  # mAP per class
-        results = (
+        results: tuple = (
             0,
             0,
             0,
@@ -179,9 +210,9 @@ class AbstractOptimizer(ABC):
             for i, (
                 imgs,
                 targets,
-                paths,
+                _paths,
                 _,
-            ) in pbar:  # epoch--batch -------------------------------------------------
+            ) in pbar:  # epoch-batch
                 ni = i + nb * epoch  # number integrated batches (since train start)
                 imgs = (
                     imgs.to(device, non_blocking=True).float() / 255.0
@@ -268,12 +299,14 @@ class AbstractOptimizer(ABC):
 
                 # Update best mAP
                 fi = fitness(
-                    np.array(results[0]["total"]).reshape(1, -1)
+                    np.array(results[0]["total"]).reshape(1, -1)  # type: ignore
                 )  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+
                 if fi > best_fitness:
                     best_fitness = fi
 
                 # Save model
+                # TODO(ulken94): fi and best_fitness have type problem.
                 if not opt.nosave or final_epoch:
                     train_loop_save_model(
                         ema.ema,
@@ -282,8 +315,8 @@ class AbstractOptimizer(ABC):
                         best_path,
                         results_file_path,
                         epoch,
-                        fi,
-                        best_fitness,
+                        fi,  # type: ignore
+                        best_fitness,  # type: ignore
                         final_epoch,
                     )
             # end epoch -----------------------------------------------------------------------------------------------
@@ -299,27 +332,28 @@ class AbstractOptimizer(ABC):
         # results = (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist())
         return results, test_time_logs, model
 
-    def log(self, msg, level=logging.INFO):
+    def log(self, msg: str, level: int = logging.INFO) -> None:
+        """Log informations."""
         self.logger.log(level, msg)
 
     @abstractmethod
-    def objective(self, trial):
+    def objective(self, trial: optuna.trial.Trial) -> Any:  # noqa: D102
         pass
 
     @abstractmethod
-    def get_score(self, *args) -> float:
+    def get_score(self, *args: Any) -> float:  # noqa: D102
         pass
 
     @abstractmethod
-    def raise_trial_pruned(self) -> None:
+    def raise_trial_pruned(self) -> None:  # noqa: D102
         pass
 
     def optimize(
         self,
-        study_name: Union[str, None] = None,
+        study_name: str,
         storage: Union[str, None] = None,
         engine_kwargs: Union[Dict, None] = None,
-        error_n_retry: int = -1,
+        error_n_retry: float = -1,
         load_if_exists: bool = True,
         pool_size: int = 0,
         pool_pre_ping: bool = False,
@@ -328,7 +362,8 @@ class AbstractOptimizer(ABC):
         study_conf: Union[str, None] = None,
         overwrite_user_attr: bool = False,
     ) -> Union[optuna.study.Study, None]:
-        """
+        """Run study.
+
         Args:
             study_name: Study Name for optuna. A unique name is generated automatically when this is None.
             storage: Storage Address/Path (postgresql://user:passwd@localhost/dbname, mysql://user:passwd@localhost/dbname, sqlite:///file_path.db, and, ...)
@@ -352,7 +387,8 @@ class AbstractOptimizer(ABC):
         )
         n_retry = 0
         study = None
-        last_error_time = 0
+        last_error_time: Union[int, float] = 0
+        rdb_storage: Optional[optuna.storages.BaseStorage]
         while error_n_retry > n_retry:
             try:
                 if storage is not None:
@@ -378,11 +414,16 @@ class AbstractOptimizer(ABC):
                         load_if_exists=load_if_exists,
                     )
 
-                study.optimize(self.objective, n_trials=self.n_trials, n_jobs=n_jobs)
+                if study is not None:
+                    study.optimize(
+                        self.objective, n_trials=self.n_trials, n_jobs=n_jobs
+                    )
+                else:
+                    raise
                 break
             except KeyboardInterrupt:
                 break
-            except:
+            except Exception:
                 self.log("Something went wrong!")
                 traceback.print_exc()
                 self.log("Re-try :: {} ::".format(n_retry))
@@ -396,29 +437,31 @@ class AbstractOptimizer(ABC):
 
         return study
 
-    def set_worker_attr(self, trial):
-        """Setting user attributes with the computer name by 'worker' attribute.
+    def set_worker_attr(self, trial: optuna.trial.Trial) -> None:
+        """Set user attributes with the computer name by 'worker' attribute.
 
         Args:
             trial: (optuna trial)
         Returns:
         """
-
         trial.set_user_attr("worker", platform.node())
 
 
 if __name__ == "__main__":
 
     class TestABCOptimizer(AbstractOptimizer):
-        def __init__(self):
+        """Test class."""
+
+        def __init__(self) -> None:
+            """Initialize test class."""
             super(TestABCOptimizer, self).__init__()
 
-        def objective(self, trial):
+        def objective(self, trial: optuna.trial.Trial) -> None:  # noqa
             return None
 
-    abs_opt = TestABCOptimizer()
+    abs_opt = TestABCOptimizer()  # type: ignore
 
-    tmp_opt = {
+    tmp_opt_dict = {
         "cfg": "models/yolov5s.yaml",
         "data": "./data/test_data.yaml",  # Replace data yaml file
         "hyp": "data/hyp.scratch.yaml",
@@ -441,21 +484,29 @@ if __name__ == "__main__":
         "workers": 8,
     }
 
-    with open(tmp_opt["cfg"], "r") as f:
+    import yaml
+
+    with open(tmp_opt_dict["cfg"], "r") as f:  # type: ignore
         cfg = yaml.load(f, yaml.FullLoader)
-    with open(tmp_opt["hyp"], "r") as f:
+    with open(tmp_opt_dict["hyp"], "r") as f:  # type: ignore
         hyp = yaml.load(f, yaml.FullLoader)
 
-    tmp_opt = Namespace(**tmp_opt)
+    tmp_opt = Namespace(**tmp_opt_dict)
     tmp_opt.total_batch_size = tmp_opt.batch_size
+
+    import os
+
     tmp_opt.world_size = (
         int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     )
     tmp_opt.global_rank = int(os.environ["RANK"]) if "RANK" in os.environ else -1
+
+    from pathlib import Path
+
     tmp_opt.logdir = increment_dir(
         Path(tmp_opt.logdir) / "exp", tmp_opt.name
     )  # runs/exp1
 
     device = select_device(tmp_opt.device, batch_size=tmp_opt.batch_size)
 
-    abs_opt.train(hyp, tmp_opt, device, None)
+    abs_opt.train(hyp, tmp_opt, device, None)  # type: ignore

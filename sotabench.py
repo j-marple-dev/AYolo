@@ -1,11 +1,12 @@
+"""Benchmark of State-of-the-art methods."""
 import argparse
 import glob
-import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any, Optional
 
-import numpy as np
+# import numpy as np
 import torch
 import yaml
 from sotabencheval.object_detection import COCOEvaluator
@@ -13,11 +14,11 @@ from sotabencheval.utils import is_server
 from tqdm import tqdm
 
 from models.experimental import attempt_load
+from models.yolo import Model
 from utils.datasets import create_dataloader
-from utils.general import (ap_per_class, box_iou, check_dataset, check_file,
-                           check_img_size, clip_coords, coco80_to_coco91_class,
-                           compute_loss, non_max_suppression, output_to_target,
-                           plot_images, scale_coords, set_logging, xywh2xyxy,
+from utils.general import (check_dataset, check_file, check_img_size,
+                           clip_coords, coco80_to_coco91_class, compute_loss,
+                           non_max_suppression, scale_coords, set_logging,
                            xyxy2xywh)
 from utils.torch_utils import select_device, time_synchronized
 
@@ -25,25 +26,26 @@ DATA_ROOT = "./.data/vision/coco" if is_server() else "../coco"  # sotabench dat
 
 
 def test(
-    data,
-    weights=None,
-    batch_size=16,
-    imgsz=640,
-    conf_thres=0.001,
-    iou_thres=0.6,  # for NMS
-    save_json=False,
-    single_cls=False,
-    augment=False,
-    verbose=False,
-    model=None,
-    dataloader=None,
-    save_dir="",
-    merge=False,
-    save_txt=False,
-):
+    data: str,
+    weights: str,
+    batch_size: int = 16,
+    imgsz: int = 640,
+    conf_thres: float = 0.001,
+    iou_thres: float = 0.6,  # for NMS
+    save_json: bool = False,
+    single_cls: bool = False,
+    augment: bool = False,
+    verbose: bool = False,
+    model: Optional[Model] = None,
+    dataloader: Optional[Any] = None,
+    save_dir: str = "",
+    merge: bool = False,
+    save_txt: bool = False,
+) -> None:
+    """Compare model with other sota models."""
     # Initialize/load model and set device
     training = model is not None
-    if training:  # called by train.py
+    if model is not None:  # called by train.py
         device = next(model.parameters()).device  # get model device
 
     else:  # called directly
@@ -57,12 +59,17 @@ def test(
             os.makedirs(out)  # make new output folder
 
         # Remove previous
-        for f in glob.glob(str(Path(save_dir) / "test_batch*.jpg")):
-            os.remove(f)
+        for t in glob.glob(str(Path(save_dir) / "test_batch*.jpg")):
+            os.remove(t)
 
         # Load model
         model = attempt_load(weights, map_location=device)  # load FP32 model
-        imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
+        if model.stride is not None:
+            imgs = check_img_size(
+                imgsz, s=int(torch.max(model.stride))
+            )  # check img_size
+        else:
+            imgs = imgsz
 
         # Multi-GPU disabled, incompatible with .half() https://github.com/ultralytics/yolov5/issues/99
         # if device.type != 'cpu' and torch.cuda.device_count() > 1:
@@ -76,26 +83,28 @@ def test(
     # Configure
     model.eval()
     with open(data) as f:
-        data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
-    check_dataset(data)  # check
-    nc = 1 if single_cls else int(data["nc"])  # number of classes
+        yaml_data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
+    check_dataset(yaml_data)  # check
+    nc = 1 if single_cls else int(yaml_data["nc"])  # number of classes
+    print(f"Number of classes: {nc}")
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
 
     # Dataloader
     if not training:
-        img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
+        img = torch.zeros((1, 3, imgs, imgs), device=device)  # init img
         _ = (
             model(img.half() if half else img) if device.type != "cpu" else None
         )  # run once
         path = (
-            data["test"] if opt.task == "test" else data["val"]
+            yaml_data["test"] if opt.task == "test" else yaml_data["val"]
         )  # path to val/test images
         dataloader = create_dataloader(
             path,
-            imgsz,
+            imgs,
             batch_size,
-            model.stride.max(),
+            # torch.max(model.stride) if model.stride is not None else 32,
+            32 if model.stride is None else int(torch.max(model.stride)),
             opt,
             hyp=None,
             augment=False,
@@ -105,7 +114,7 @@ def test(
         )[0]
 
     seen = 0
-    names = model.names if hasattr(model, "names") else model.module.names
+    # names = model.names if hasattr(model, "names") else model.module.names
     coco91class = coco80_to_coco91_class()
     s = ("%20s" + "%12s" * 6) % (
         "Class",
@@ -116,24 +125,35 @@ def test(
         "mAP@.5",
         "mAP@.5:.95",
     )
-    p, r, f1, mp, mr, map50, map, t0, t1 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    p, r, f1, mp, mr, map50, map, t0, t1 = (  # noqa: F841
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
     loss = torch.zeros(3, device=device)
-    jdict, stats, ap, ap_class = [], [], [], []
+    jdict: list = []
+    stats: list = []
     evaluator = COCOEvaluator(root=DATA_ROOT, model_name=opt.weights.replace(".pt", ""))
-    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+    for _batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
-        whwh = torch.Tensor([width, height, width, height]).to(device)
+        whwh = torch.Tensor([width, height, width, height]).to(device)  # noqa: F841
 
         # Disable gradients
         with torch.no_grad():
             # Run model
-            t = time_synchronized()
+            t_s = time_synchronized()
             model_out = model(img, augment=augment)  # inference and training outputs
-            t0 += time_synchronized() - t
+            t0 += time_synchronized() - t_s
             inf_out = model_out[0]
 
             # Compute loss
@@ -144,11 +164,11 @@ def test(
                 ]  # box, obj, cls
 
             # Run NMS
-            t = time_synchronized()
+            t_s = time_synchronized()
             output = non_max_suppression(
                 inf_out, conf_thres=conf_thres, iou_thres=iou_thres, merge=merge
             )
-            t1 += time_synchronized() - t
+            t1 += time_synchronized() - t_s
 
         # Statistics per image
         for si, pred in enumerate(output):
@@ -175,12 +195,12 @@ def test(
                     [1, 0, 1, 0]
                 ]  # normalization gain whwh
                 x = pred.clone()
-                x[:, :4] = scale_coords(
+                x[:, :4] = scale_coords(  # type: ignore
                     img[si].shape[1:], x[:, :4], shapes[si][0], shapes[si][1]
                 )  # to original
-                for *xyxy, conf, cls in x:
+                for *xyxy, conf, cls in x:  # noqa: B007
                     xywh = (
-                        (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)
+                        (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn)  # type: ignore
                         .view(-1)
                         .tolist()
                     )  # normalized xywh
@@ -198,14 +218,14 @@ def test(
                 scale_coords(
                     img[si].shape[1:], box, shapes[si][0], shapes[si][1]
                 )  # to original shape
-                box = xyxy2xywh(box)  # xywh
-                box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
-                for p, b in zip(pred.tolist(), box.tolist()):
+                box_out = xyxy2xywh(box)  # xywh
+                box_out[:, :2] -= box_out[:, 2:] / 2  # xy center to top-left corner
+                for p, b in zip(pred.tolist(), box_out.tolist()):
                     result = {
                         "image_id": int(image_id) if image_id.isnumeric() else image_id,
-                        "category_id": coco91class[int(p[5])],
+                        "category_id": coco91class[int(p[5])],  # type: ignore
                         "bbox": [round(x, 3) for x in b],
-                        "score": round(p[4], 5),
+                        "score": round(p[4], 5),  # type: ignore
                     }
                     jdict.append(result)
 
@@ -374,10 +394,10 @@ if __name__ == "__main__":
                 Path(weights).stem,
             )  # filename to save to
             x = list(range(320, 800, 64))  # x axis
-            y = []  # y axis
+            # y = []  # y axis
             for i in x:  # img-size
                 print("\nRunning %s point %s..." % (f, i))
-                r, _, t = test(
+                test(
                     opt.data,
                     weights,
                     opt.batch_size,
@@ -386,7 +406,7 @@ if __name__ == "__main__":
                     opt.iou_thres,
                     opt.save_json,
                 )
-                y.append(r + t)  # results and times
-            np.savetxt(f, y, fmt="%10.4g")  # save
-        os.system("zip -r study.zip study_*.txt")
+                # y.append(r + t)  # results and times
+            # np.savetxt(f, y, fmt="%10.4g")  # save
+        # os.system("zip -r study.zip study_*.txt")
         # utils.general.plot_study_txt(f, x)  # plot

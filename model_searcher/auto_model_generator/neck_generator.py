@@ -4,7 +4,7 @@
 - Contact: limjk@jmarple.ai
 """
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Union
+from typing import Any, List, Tuple, Union
 
 import optuna
 
@@ -12,7 +12,12 @@ from model_searcher.auto_model_generator.backbone_generator import ArgGen
 
 
 class AutoNeckGeneratorAbstract(ABC):
-    def __init__(self, trial: optuna.trial.Trial, neck_name: str, p_idx: List[int]):
+    """Abstract class of neck generator."""
+
+    def __init__(
+        self, trial: optuna.trial.Trial, neck_name: str, p_idx: List[int]
+    ) -> None:
+        """Initialize AutoNeckGeneratorAbstract class."""
         self.trial = trial
         self.neck_name = neck_name
         self.p_idx = p_idx
@@ -27,20 +32,25 @@ class AutoNeckGeneratorAbstract(ABC):
         """
         pass
 
-    def _get_suggest_name(self, name):
+    def _get_suggest_name(self, name: str) -> str:
+        """Get suggest name."""
         return f"neck.{self.neck_name}.{name}"
 
 
 class AutoTinyNeckGenerator(AutoNeckGeneratorAbstract):
+    """Class which generate tiny neck."""
+
     CHANNEL_STEP = 2
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
+        """Initialize AutoTinyNeckGenerator class."""
         super(AutoTinyNeckGenerator, self).__init__(*args)
 
-    def _get_bottleneck_args(self, idx, name):
+    def _get_bottleneck_args(self, idx: int, name: str) -> list:
+        """Return convolution block arguments."""
         return ArgGen.get_block_args(
             idx,
-            self.trial.suggest_categorical(
+            self.trial.suggest_categorical(  # type: ignore
                 self._get_suggest_name(name), ["MBConv", "BottleneckCSP", "Bottleneck"]
             ),
             self.trial.suggest_int(
@@ -51,7 +61,7 @@ class AutoTinyNeckGenerator(AutoNeckGeneratorAbstract):
             ),
             self.trial.suggest_int(self._get_suggest_name(f"{name}.n_repeat"), 1, 3),
             self.trial.suggest_int(self._get_suggest_name(f"{name}.expansion"), 1, 3),
-            conv_type=self.trial.suggest_categorical(
+            conv_type=self.trial.suggest_categorical(  # type: ignore
                 self._get_suggest_name(f"{name}.conv_type"),
                 ["Conv", "DWConv", "SeparableConv"],
             ),
@@ -59,6 +69,7 @@ class AutoTinyNeckGenerator(AutoNeckGeneratorAbstract):
         )
 
     def generate_neck(self) -> Tuple[List[List], Union[List[int], int]]:
+        """Generate neck."""
         neck = []
         feat_idx = []
 
@@ -67,7 +78,7 @@ class AutoTinyNeckGenerator(AutoNeckGeneratorAbstract):
         ):
             neck += ArgGen.get_conv_args(
                 -1,
-                self.trial.suggest_categorical(
+                self.trial.suggest_categorical(  # type: ignore
                     self._get_suggest_name("conv00"),
                     ["Conv", "DWConv", "SeparableConv"],
                 ),
@@ -95,7 +106,7 @@ class AutoTinyNeckGenerator(AutoNeckGeneratorAbstract):
             feat_idx.append(self.p_idx[-1] + len(neck))
             neck += ArgGen.get_conv_args(
                 -1,
-                self.trial.suggest_categorical(
+                self.trial.suggest_categorical(  # type: ignore
                     self._get_suggest_name("conv01"),
                     ["Focus", "Conv", "DWConv", "SeparableConv"],
                 ),
@@ -128,12 +139,16 @@ class AutoTinyNeckGenerator(AutoNeckGeneratorAbstract):
 
 
 class AutoBiFPNGenerator(AutoNeckGeneratorAbstract):
+    """Class that generate BiFPN neck layers automatically."""
+
     CHANNEL_STEP = 4
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
+        """Initialize AutoBiFPNGenerator class."""
         super(AutoBiFPNGenerator, self).__init__(*args)
 
     def generate_neck(self) -> Tuple[List[List], int]:
+        """Generate neck."""
         n_repeat = self.trial.suggest_int(self._get_suggest_name("n_repeat"), 1, 6)
         n_channel = self.trial.suggest_int(
             self._get_suggest_name("n_channel"),
@@ -148,13 +163,19 @@ class AutoBiFPNGenerator(AutoNeckGeneratorAbstract):
 
 
 class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
+    """Class that generate YOLO neck layers automatically."""
+
     CHANNEL_STEP = 2
 
-    def __init__(self, *args):
+    def __init__(self, *args: Any) -> None:
+        """Initialize AutoYOLONeckGenerator class."""
         super(AutoYOLONeckGenerator, self).__init__(*args)
 
-    def __make_head(self, neck_blocks, bottleneck_blocks):
-        neck = []
+    def __make_head(
+        self, neck_blocks: Union[list, tuple], bottleneck_blocks: Union[list, tuple]
+    ) -> Tuple[List[List], List[int]]:
+        """Generate head."""
+        neck: list = []
         feat_idx = []
         last_conv_idx = 1  # used only in 3 feature layers.
 
@@ -180,6 +201,7 @@ class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
         return neck, feat_idx
 
     def __generate_neck_tiny(self) -> Tuple[List[List], List[int]]:
+        """Generate neck."""
         up_conv_type = self.trial.suggest_categorical(
             self._get_suggest_name("up_conv_type.tiny"), ["Conv", "DWConv"]
         )  # "SeparableConv"
@@ -219,7 +241,7 @@ class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
                     1,
                     down_conv_type,
                     [n_channel // 2]
-                    + ([kernel_size_down, 2] if down_conv_type != "Focus" else []),
+                    + ([kernel_size_down, 2] if down_conv_type != "Focus" else []),  # type: ignore
                 ],
                 [[-1, self.p_idx[-1] + 1], 1, "Concat", [1]],
             ],
@@ -232,6 +254,7 @@ class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
         return self.__make_head(neck_blocks, bottleneck_blocks)
 
     def __generate_neck_normal(self) -> Tuple[List[List], List[int]]:
+        """Generate normal neck."""
         up_conv_type = self.trial.suggest_categorical(
             self._get_suggest_name("up_conv_type"), ["Conv", "DWConv"]
         )  # "SeparableConv"
@@ -276,7 +299,7 @@ class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
                     1,
                     down_conv_type,
                     [n_channel // 2]
-                    + ([kernel_size_down, 2] if down_conv_type != "Focus" else []),
+                    + ([kernel_size_down, 2] if down_conv_type != "Focus" else []),  # type: ignore
                 ],
                 [
                     [-1, self.p_idx[-1]],
@@ -291,7 +314,7 @@ class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
                     1,
                     down_conv_type,
                     [n_channel]
-                    + ([kernel_size_down, 2] if down_conv_type != "Focus" else []),
+                    + ([kernel_size_down, 2] if down_conv_type != "Focus" else []),  # type: ignore
                 ],
                 [[-1, self.p_idx[-1] + 1], 1, "Concat", [1]],
             ],
@@ -306,6 +329,7 @@ class AutoYOLONeckGenerator(AutoNeckGeneratorAbstract):
         return self.__make_head(neck_blocks, bottleneck_blocks)
 
     def generate_neck(self) -> Tuple[List[List], List[int]]:
+        """Generate neck."""
         neck_type = self.trial.suggest_categorical(
             self._get_suggest_name("neck_type"), ["Normal", "Tiny"]
         )

@@ -1,3 +1,4 @@
+"""Module for training."""
 import argparse
 import logging
 import math
@@ -7,6 +8,7 @@ import shutil
 import test  # import test.py to get mAP after each epoch
 import time
 from pathlib import Path
+from typing import List, Union
 
 import numpy as np
 import torch.distributed as dist
@@ -15,30 +17,38 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
-import wandb
 import yaml
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+import wandb
 from models.yolo import Model
 from utils.datasets import create_dataloader
 from utils.general import (check_anchors, check_dataset, check_file,
                            check_git_status, check_img_size, compute_loss,
-                           fitness, get_latest_run, increment_dir, init_seeds,
+                           fitness, get_latest_run, init_seeds,
                            labels_to_class_weights, labels_to_image_weights,
                            plot_evolution, plot_images, plot_labels,
                            plot_results, print_mutation, set_logging,
                            strip_optimizer, torch_distributed_zero_first)
-from utils.google_utils import attempt_download
+# from utils.google_utils import attempt_download
 from utils.torch_utils import ModelEMA, intersect_dicts, select_device
 from utils.wandb_utils import load_model_from_wandb, wlog_weight
 
 logger = logging.getLogger(__name__)
 
 
-def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 10):
+def train(
+    hyp: dict,
+    opt: argparse.Namespace,
+    device: torch.device,
+    tb_writer: SummaryWriter = None,
+    wlog: bool = False,
+    test_every_epoch: int = 10,
+) -> tuple:
+    """Train the model."""
     logger.info(f"Hyperparameters {hyp}")
     log_dir = (
         Path(tb_writer.log_dir) if tb_writer else Path(opt.logdir) / "evolve"
@@ -83,7 +93,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     # Model
     pretrained = weights.endswith(".pt")
     if pretrained:
-        ## HS: debugger for investigating autoanchor
+        # HS: debugger for investigating autoanchor
         # with torch_distributed_zero_first(rank):
         #     attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
@@ -107,7 +117,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
         model, _ = load_model_from_wandb(
             opt.cfg, device=device, load_weights=not opt.no_weight_wandb
         )
-        for k, v in model.named_parameters():
+        for _, v in model.named_parameters():
             v.requires_grad = True
     else:
         model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create
@@ -129,17 +139,20 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     )  # accumulate loss before optimizing
     hyp["weight_decay"] *= total_batch_size * accumulate / nbs  # scale weight_decay
 
-    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
-        if hasattr(v, "bias") and isinstance(v.bias, torch.Tensor):
-            pg2.append(v.bias)
+    pg0: List[torch.Tensor] = []
+    pg1: List[torch.Tensor] = []
+    pg2: List[torch.Tensor] = []  # optimizer parameter groups
+    for _, v in model.named_modules():
+        if hasattr(v, "bias") and isinstance(v.bias, torch.Tensor):  # type: ignore
+            pg2.append(v.bias)  # type: ignore
         if isinstance(v, nn.BatchNorm2d):
             pg0.append(v.weight)
-        elif hasattr(v, "weight") and isinstance(v.weight, torch.Tensor):
-            pg1.append(v.weight)
-    for k, v in model.named_parameters():
+        elif hasattr(v, "weight") and isinstance(v.weight, torch.Tensor):  # type: ignore
+            pg1.append(v.weight)  # type: ignore
+    for _, v in model.named_parameters():
         v.requires_grad = True
 
+    optimizer: torch.optim.Optimizer
     if opt.adam:
         optimizer = optim.Adam(
             pg0, lr=hyp["lr0"], betas=(hyp["momentum"], 0.999)
@@ -169,7 +182,8 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # Resume
-    start_epoch, best_fitness = 0, 0.0
+    start_epoch = 0
+    best_fitness: Union[float, np.ndarray] = 0.0
     if pretrained:
         # Optimizer
         if ckpt["optimizer"] is not None:
@@ -210,7 +224,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
 
     # DP mode
     if cuda and rank == -1 and torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+        model = torch.nn.DataParallel(model)  # type: ignore
 
     # SyncBatchNorm
     if opt.sync_bn and cuda and rank != -1:
@@ -222,7 +236,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
 
     # DDP mode
     if cuda and rank != -1:
-        model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank)
+        model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank)  # type: ignore
 
     # Trainloader
     dataloader, dataset = create_dataloader(
@@ -253,7 +267,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     )
 
     # Process 0
-    if rank in [-1, 0]:
+    if rank in [-1, 0] and ema is not None:
         ema.updates = start_epoch * nb // accumulate  # set EMA updates
         testloader = create_dataloader(
             test_path,
@@ -305,7 +319,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
     )  # number of warmup iterations, max(3 epochs, 1k iterations)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     maps = np.zeros(nc)  # mAP per class
-    results = (
+    results: tuple = (
         {
             "total": (0, 0, 0, 0),
             "small": (0, 0, 0, 0),
@@ -316,7 +330,9 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
         0,
         0,
     )  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
-    scheduler.last_epoch = start_epoch - 1  # do not move
+    # do not move
+    # scheduler has last_epoch attribute.
+    scheduler.last_epoch = start_epoch - 1  # type: ignore
     scaler = amp.GradScaler(enabled=cuda)
     logger.info(
         "Image sizes %g train, %g test\n"
@@ -334,13 +350,13 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
             # Generate indices
             if rank in [-1, 0]:
                 cw = (
-                    model.class_weights.cpu().numpy() * (1 - maps) ** 2
+                    model.class_weights.cpu().numpy() * (1 - maps) ** 2  # type: ignore
                 )  # class weights
                 iw = labels_to_image_weights(
                     dataset.labels, nc=nc, class_weights=cw
                 )  # image weights
                 dataset.indices = random.choices(
-                    range(dataset.n), weights=iw, k=dataset.n
+                    range(dataset.n), weights=iw, k=dataset.n  # type: ignore
                 )  # rand weighted idx
             # Broadcast if DDP
             if rank != -1:
@@ -359,14 +375,13 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
 
         mloss = torch.zeros(4, device=device)  # mean losses
         if rank != -1:
-            dataloader.sampler.set_epoch(epoch)
-        pbar = enumerate(dataloader)
+            dataloader.sampler.set_epoch(epoch)  # type: ignore
         logger.info(
             ("\n" + "%10s" * 8)
             % ("Epoch", "gpu_mem", "box", "obj", "cls", "total", "targets", "img_size")
         )
         if rank in [-1, 0]:
-            pbar = tqdm(pbar, total=nb)  # progress bar
+            pbar = tqdm(enumerate(dataloader), total=nb)  # progress bar
         optimizer.zero_grad()
         for i, (
             imgs,
@@ -405,7 +420,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
 
             # Multi-scale
             if opt.multi_scale:
-                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # type: ignore
                 sf = sz / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     ns = [
@@ -456,13 +471,13 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
 
                 # Plot
                 if ni < 3:
-                    f = str(log_dir / ("train_batch%g.jpg" % ni))  # filename
+                    f_name = str(log_dir / ("train_batch%g.jpg" % ni))  # filename
                     result = plot_images(
-                        images=imgs, targets=targets, paths=paths, fname=f
+                        images=imgs, targets=targets, paths=paths, fname=f_name
                     )
                     if tb_writer and result is not None:
                         tb_writer.add_image(
-                            f, result, dataformats="HWC", global_step=epoch
+                            f_name, result, dataformats="HWC", global_step=epoch
                         )
                         # tb_writer.add_graph(model, imgs)  # add model to tensorboard
 
@@ -473,7 +488,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
         scheduler.step()
 
         # DDP process 0 or single-GPU
-        if rank in [-1, 0]:
+        if rank in [-1, 0] and ema is not None:
             # mAP
             if ema:
                 ema.update_attr(
@@ -485,7 +500,7 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
                     opt.data,
                     batch_size=total_batch_size,
                     imgsz=imgsz_test,
-                    model=ema.ema,
+                    model=ema.ema,  # type: ignore
                     single_cls=opt.single_cls,
                     dataloader=testloader,
                 )
@@ -528,13 +543,13 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
                     "metrics/mAP_0.5:0.95",
                 ]
                 for bbox_size in results[0]:
-                    for v, tag in zip(list(results[0][bbox_size]), metric_tags):
+                    for value, tag in zip(list(results[0][bbox_size]), metric_tags):
                         if bbox_size == "total":
                             tag_name = tag
                         else:
                             tag_name = tag + "_" + bbox_size
-                        tb_writer.add_scalar(tag_name, v, epoch)
-                        wandb_data.update({tag_name: v})
+                        tb_writer.add_scalar(tag_name, value, epoch)
+                        wandb_data.update({tag_name: value})  # type: ignore
                 if wlog:
                     wandb.log(wandb_data)
                     wlog_weight(model)
@@ -576,8 +591,8 @@ def train(hyp, opt, device, tb_writer=None, wlog=False, test_every_epoch: int = 
         for f1, f2 in zip(
             [wdir / "last.pt", wdir / "best.pt", results_file], [flast, fbest, fresults]
         ):
-            if os.path.exists(f1):
-                os.rename(f1, f2)  # rename
+            if os.path.exists(str(f1)):
+                os.rename(str(f1), str(f2))  # rename
                 if str(f2).endswith(".pt"):  # is *.pt
                     strip_optimizer(f2)  # strip optimizer
                     os.system(
@@ -761,15 +776,16 @@ if __name__ == "__main__":
             group=model_name,
             tags=[model_name],
         )
-        opt.logdir = wandb.run.dir
+        opt.logdir = wandb.run.dir  # type: ignore
 
     # Resume
     if opt.resume:  # resume an interrupted run
         ckpt = (
             opt.resume if isinstance(opt.resume, str) else get_latest_run()
         )  # specified or most recent path
-        log_dir = Path(ckpt).parent.parent  # runs/exp0
-        assert os.path.isfile(ckpt), "ERROR: --resume checkpoint does not exist"
+        # runs/exp0
+        log_dir = Path(ckpt).parent.parent  # type: ignore
+        assert os.path.isfile(ckpt), "ERROR: --resume checkpoint does not exist"  # type: ignore
         with open(log_dir / "opt.yaml") as f:
             opt = argparse.Namespace(**yaml.load(f, Loader=yaml.FullLoader))  # replace
         opt.cfg, opt.weights, opt.resume = "", ckpt, True
@@ -901,10 +917,10 @@ if __name__ == "__main__":
                     hyp[k] = float(x[i + 7] * v[i])  # mutate
 
             # Constrain to limits
-            for k, v in meta.items():
-                hyp[k] = max(hyp[k], v[1])  # lower limit
-                hyp[k] = min(hyp[k], v[2])  # upper limit
-                hyp[k] = round(hyp[k], 5)  # significant digits
+            for key, val in meta.items():
+                hyp[key] = max(hyp[key], val[1])  # lower limit
+                hyp[key] = min(hyp[key], val[2])  # upper limit
+                hyp[key] = round(hyp[key], 5)  # significant digits
 
             # Train mutation
             results = train(hyp.copy(), opt, device)

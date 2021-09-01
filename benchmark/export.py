@@ -1,3 +1,4 @@
+"""Export model to onnx file test."""
 import argparse
 import os
 import sys
@@ -5,11 +6,11 @@ import sys
 import torch
 import torch.nn as nn
 
-sys.path.append("/usr/src/yolo")  # to run subdirecotires
-import models
 from models.experimental import attempt_load
 from utils.activations import Hardsigmoid, Hardswish, SiLU, convert_activation
-from utils.general import check_img_size, set_logging
+from utils.general import check_img_size
+
+sys.path.append("/usr/src/yolo")  # to run subdirecotires
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -52,9 +53,10 @@ if __name__ == "__main__":
     img = torch.zeros(opt.batch_size, 3, *opt.img_size)
 
     # Update model(torch script)
-    for k, m in model.named_modules():
+    for _, m in model.named_modules():
         m._non_persistent_buffers_set = set()
-    model.model[-1].export = True
+    model.model[-1].export = True  # type: ignore
+
     y = model(img)  # dry run
 
     # Torchjit

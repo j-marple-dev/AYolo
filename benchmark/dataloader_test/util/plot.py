@@ -1,6 +1,5 @@
-import typing
-from collections.abc import Iterable
-from typing import Union
+"""Module for plot utilities."""
+from typing import Generator, Union
 
 import cv2
 import numpy as np
@@ -10,17 +9,7 @@ import torch
 from utils.general import xywh2xyxy
 
 
-def convert_dali_nparray(img, batch_size):
-    imgs = []
-    import pdb
-
-    pdb.set_trace()
-    for i in range(batch_size):
-        imgs.append(img[i])
-    return np.array(imgs)
-
-
-def empty_gen():
+def empty_gen() -> Generator:
     """Empty iterator to handle zip."""
     yield from ()
 
@@ -29,8 +18,8 @@ def result_plot_predonly(
     image: Union[torch.Tensor, nvidia.dali.backend_impl.TensorListGPU],
     pred: list,
     batch_size: int = 0,
-):
-    """function for plot result from model(prediction only)."""
+) -> None:
+    """Plot result from model(prediction only)."""
     if isinstance(image, nvidia.dali.backend_impl.TensorListGPU):
         image = image.as_cpu().as_array()
 
@@ -72,19 +61,22 @@ def result_plot_predonly(
 
 
 def result_plot(
-    image: torch.Tensor, targets: torch.Tensor, pred: list, batch_size: int = 0
-):
-    """function for plot result from model."""
+    image: Union[torch.Tensor, nvidia.dali.backend_impl.TensorListGPU],
+    targets: torch.Tensor,
+    pred: list,
+    batch_size: int = 0,
+) -> None:
+    """Plot result from model."""
     assert targets is not None
     if isinstance(image, nvidia.dali.backend_impl.TensorListGPU):
         image = image.as_cpu().as_array()
 
     if len(image.shape) == 3:
-        image = [
+        b_image = [
             image,
         ]
 
-    for id, img in enumerate(image):
+    for id, img in enumerate(b_image):
         if isinstance(img, torch.Tensor):
             img = img.cpu().permute(1, 2, 0).numpy()
         else:
@@ -102,7 +94,7 @@ def result_plot(
             pd = pred[id].cpu().numpy()
         if targets[targets[:, 0] == id] is not None:
             gt = targets[targets[:, 0] == id].cpu().numpy()
-            gt = xywh2xyxy(gt[:, 2:])
+            gt = xywh2xyxy(gt[:, 2:])  # type: ignore
             gt = (gt * img.shape[0]).astype(np.int32)
 
         for pd_xyxyp in pd:

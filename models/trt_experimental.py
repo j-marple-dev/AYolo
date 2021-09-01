@@ -1,64 +1,33 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import argparse
 import sys
+from typing import List, Union
 
 import cv2
 import numpy as np
+import pycuda.autoinit  # noqa: F401
+import pycuda.driver as cuda  # noqa: F401
 import tensorrt as trt
 import torch
-
-sys.path.append("/usr/src/yolo")
-import pycuda.autoinit
-import pycuda.driver as cuda
 from tqdm import tqdm
 
 from benchmark.dataloader_test.trt_wrapper import TrtWrapper
 from models.experimental import attempt_load
+from models.onnx_to_trt import allocate_buffers  # noqaa: F401
 from utils.datasets import create_dataloader
 from utils.general import xywh2xyxy, xyxy2xywh
 from utils.torch_utils import select_device
 
+sys.path.append("/usr/src/yolo")
 
-def empty_gen():
+
+def empty_gen():  # noqa: ANN201
     """Empty iterator to handle zip."""
     yield from ()
-
-
-def allocate_buffers(engine, is_explicit_batch=False, dynamic_shapes=[]):
-    inputs = []
-    outputs = []
-    bindings = []
-
-    class HostDeviceMem(object):
-        def __init__(self, host_mem, device_mem):
-            self.host = host_mem
-            self.device = device_mem
-
-        def __str__(self):
-            return "Host:\n" + str(self.host) + "\nDevice:\n" + str(self.device)
-
-        def __repr__(self):
-            return self.__str__()
-
-    for binding in engine:
-        dims = engine.get_binding_shape(binding)
-        print(dims)
-        if dims[0] == -1:
-            assert len(dynamic_shapes) > 0
-            dims[0] = dynamic_shapes[0]
-        size = trt.volume(dims) * engine.max_batch_size
-        dtype = trt.nptype(engine.get_binding_dtype(binding))
-        # Allocate host and device buffers
-        host_mem = cuda.pagelocked_empty(size, dtype)
-        device_mem = cuda.mem_alloc(host_mem.nbytes)
-        # Append the device buffer to device bindings.
-        bindings.append(int(device_mem))
-        # Append to the appropriate list.
-        if engine.binding_is_input(binding):
-            inputs.append(HostDeviceMem(host_mem, device_mem))
-        else:
-            outputs.append(HostDeviceMem(host_mem, device_mem))
-
-    return inputs, outputs, bindings
 
 
 def result_plot(
@@ -69,16 +38,19 @@ def result_plot(
     h_: list,
     i_: list,
     batch_size: int = 0,
-):
-    """function for plot result from model."""
+) -> None:
+    """Plot result from model."""
     assert targets is not None
+    b_image: Union[List[torch.Tensor], torch.Tensor]
 
     if len(image.shape) == 3:
-        image = [
+        b_image = [
             image,
         ]
+    else:
+        b_image = image
 
-    for id, img in enumerate(image):
+    for id, img in enumerate(b_image):
         if isinstance(img, torch.Tensor):
             img = img.cpu().permute(1, 2, 0).numpy()
         else:
@@ -116,7 +88,7 @@ def result_plot(
             dst_pred = cv2.rectangle(dst_pred, pd_xy1, pd_xy2, (254, 226, 62), 2)
             dst_pred = cv2.putText(
                 dst_pred,
-                f"TORCH",
+                "TORCH",
                 (pd_xy1[0], pd_xy1[1] - 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -132,7 +104,7 @@ def result_plot(
             dst_pred = cv2.rectangle(dst_pred, pd_xy1, pd_xy2, (0, 255, 0), 2)
             dst_pred = cv2.putText(
                 dst_pred,
-                f"FULL",
+                "FULL",
                 (pd_xy1[0], pd_xy1[1] - 45),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -147,7 +119,7 @@ def result_plot(
             dst_pred = cv2.rectangle(dst_pred, pd_xy1, pd_xy2, (62, 226, 254), 2)
             dst_pred = cv2.putText(
                 dst_pred,
-                f"HALF",
+                "HALF",
                 (pd_xy1[0], pd_xy1[1] - 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -163,7 +135,7 @@ def result_plot(
             dst_pred = cv2.rectangle(dst_pred, pd_xy1, pd_xy2, (0, 0, 255), 2)
             dst_pred = cv2.putText(
                 dst_pred,
-                f"INT8",
+                "INT8",
                 (pd_xy1[0], pd_xy1[1] - 15),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -199,7 +171,10 @@ if __name__ == "__main__":
     torch_path = "/usr/src/yolo/runs/exp0/weights/best.pt"
 
     class opt_dl:
-        def __init__(self):
+        """Sample dataloader class."""
+
+        def __init__(self) -> None:
+            """Initialize the class."""
             self.single_cls = True
 
     dataloader_config = {
@@ -226,7 +201,7 @@ if __name__ == "__main__":
     half = TrtWrapper(opt.exp, "fp16", opt.batch_size, device, True)
     int8 = TrtWrapper(opt.exp, "int8", opt.batch_size, device, True)
 
-    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader)):
+    for _batch_i, (img, targets, _paths, _shapes) in enumerate(tqdm(dataloader)):
         img = torch.div(img.to(device), 255.0)  # 0 - 255 to 0.0 - 1.0
         img_cpy = img.detach().clone().to("cpu")
         targets = targets.to(device)

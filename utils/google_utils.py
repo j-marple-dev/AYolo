@@ -1,3 +1,8 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 # This file contains google utils: https://cloud.google.com/storage/docs/reference/libraries
 # pip install --upgrade google-cloud-storage
 # from google.cloud import storage
@@ -11,13 +16,14 @@ from pathlib import Path
 import torch
 
 
-def gsutil_getsize(url=""):
+def gsutil_getsize(url: str = "") -> int:
+    """Get size."""
     # gs://bucket/file size https://cloud.google.com/storage/docs/gsutil/commands/du
     s = subprocess.check_output("gsutil du %s" % url, shell=True).decode("utf-8")
     return eval(s.split(" ")[0]) if len(s) else 0  # bytes
 
 
-def attempt_download(weights):
+def attempt_download(weights: str) -> None:
     """Attempt to download pretrained weights if not found locally."""
     weights = weights.strip().replace("'", "")
     file = Path(weights).name
@@ -52,7 +58,7 @@ def attempt_download(weights):
             print("Download error: %s" % e)
             url = "https://storage.googleapis.com/ultralytics/yolov5/ckpt/" + file
             print("Downloading %s to %s..." % (url, weights))
-            r = os.system(
+            r = os.system(  # noqa
                 "curl -L %s -o %s" % (url, weights)
             )  # torch.hub.download_url_to_file(url, weights)
         finally:
@@ -64,10 +70,13 @@ def attempt_download(weights):
                 ) else None  # remove partial downloads
                 print("ERROR: Download failure: %s" % msg)
             print("")
-            return
+            return  # noqa
 
 
-def gdrive_download(id="1n_oKgR81BJtqk75b00eAjdv03qVCQn2f", name="coco128.zip"):
+def gdrive_download(
+    id: str = "1n_oKgR81BJtqk75b00eAjdv03qVCQn2f", name: str = "coco128.zip"
+) -> int:
+    """Download a file from Google Drive."""
     # Downloads a file from Google Drive. from utils.google_utils import *; gdrive_download()
     t = time.time()
 
@@ -111,7 +120,8 @@ def gdrive_download(id="1n_oKgR81BJtqk75b00eAjdv03qVCQn2f", name="coco128.zip"):
     return r
 
 
-def get_token(cookie="./cookie"):
+def get_token(cookie: str = "./cookie") -> str:
+    """Get token."""
     with open(cookie) as f:
         for line in f:
             if "download" in line:

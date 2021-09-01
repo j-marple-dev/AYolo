@@ -1,9 +1,15 @@
+"""Module Description.
+
+- Author: Haneol Kim
+- Contact: hekim@jmarple.ai
+"""
 import argparse
 import os
 import sys
 
-sys.path.append("/usr/src/yolo")
 from utils.wandb_utils import load_model_from_wandb
+
+sys.path.append("/usr/src/yolo")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

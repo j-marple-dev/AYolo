@@ -1,4 +1,4 @@
-"""calibrator.py The original code could be found in TensorRT-7.x sample code:
+"""calibrator.py The original code could be found in TensorRT-7.x sample code:.
 
 "samples/python/int8_caffe_mnist/calibrator.py".  I made the modification so that the
 Calibrator could handle MS-COCO dataset images instead of MNIST.
@@ -54,15 +54,15 @@ Calibrator could handle MS-COCO dataset images instead of MNIST.
 
 
 import os
+from typing import Any, Optional, Union
 
 import cv2
 import numpy as np
-import pycuda.autoinit
 import pycuda.driver as cuda
 import tensorrt as trt
 
 
-def _preprocess_yolo(img, input_shape):
+def _preprocess_yolo(img: np.ndarray, input_shape: Union[tuple, list]) -> np.ndarray:
     """Preprocess an image before TRT YOLO inferencing.
 
     # Args
@@ -82,14 +82,20 @@ def _preprocess_yolo(img, input_shape):
 
 
 class YOLOEntropyCalibrator(trt.IInt8EntropyCalibrator2):
-    """YOLOEntropyCalibrator This class implements TensorRT's IInt8EntropyCalibtrator2
-    interface.
+    """This class implements TensorRT's IInt8EntropyCalibtrator2 interface.
 
     It reads all images from the specified directory and generates INT8 calibration data
     for YOLO models accordingly.
     """
 
-    def __init__(self, img_dir, net_hw, cache_file, batch_size=1):
+    def __init__(
+        self,
+        img_dir: str,
+        net_hw: Union[tuple, list],
+        cache_file: str,
+        batch_size: int = 1,
+    ) -> None:
+        """Initialize YOLOEntropyCalibrator class."""
         if not os.path.isdir(img_dir):
             raise FileNotFoundError("%s does not exist" % img_dir)
         if len(net_hw) != 2 or net_hw[0] % 32 or net_hw[1] % 32:
@@ -115,16 +121,19 @@ class YOLOEntropyCalibrator(trt.IInt8EntropyCalibrator2):
         # Allocate enough memory for a whole batch.
         self.device_input = cuda.mem_alloc(self.blob_size)
 
-    def __del__(self):
+    def __del__(self) -> None:
+        """Free CUDA memory when deletes."""
         del self.device_input  # free CUDA memory
 
-    def get_batch_size(self):
+    def get_batch_size(self) -> int:
+        """Return batch size."""
         return self.batch_size
 
-    def get_batch(self, names):
+    def get_batch(self, names: Any) -> Optional[list]:
+        """Get input as batch."""
         if self.current_index + self.batch_size > len(self.jpgs):
             return None
-        current_batch = int(self.current_index / self.batch_size)
+        current_batch = int(self.current_index / self.batch_size)  # noqa: F841
 
         batch = []
         for i in range(self.batch_size):
@@ -132,20 +141,24 @@ class YOLOEntropyCalibrator(trt.IInt8EntropyCalibrator2):
             img = cv2.imread(img_path)
             assert img is not None, "failed to read %s" % img_path
             batch.append(_preprocess_yolo(img, self.net_hw))
-        batch = np.stack(batch)
-        assert batch.nbytes == self.blob_size
+        batch_n = np.stack(batch)
+        assert batch_n.nbytes == self.blob_size
 
-        cuda.memcpy_htod(self.device_input, np.ascontiguousarray(batch))
+        cuda.memcpy_htod(self.device_input, np.ascontiguousarray(batch_n))
         self.current_index += self.batch_size
         return [self.device_input]
 
-    def read_calibration_cache(self):
+    def read_calibration_cache(self) -> bytes:
+        """Use cache if it exists."""
         # If there is a cache, use it instead of calibrating again.
         # Otherwise, implicitly return None.
         if os.path.exists(self.cache_file):
             with open(self.cache_file, "rb") as f:
                 return f.read()
+        else:
+            raise FileNotFoundError
 
-    def write_calibration_cache(self, cache):
+    def write_calibration_cache(self, cache: bytes) -> None:
+        """Write calibration cache."""
         with open(self.cache_file, "wb") as f:
             f.write(cache)

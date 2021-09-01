@@ -6,19 +6,15 @@
 
 import os
 import re
-from argparse import Namespace
-from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import torch
 import torch.nn as nn
-import wandb
 import yaml
 
+import wandb
 from models.yolo import Model
-from utils.datasets import create_dataloader
-from utils.general import check_img_size
-from utils.torch_utils import intersect_dicts, select_device
+from utils.torch_utils import select_device
 
 
 def read_opt_yaml(folder_path: str) -> Dict[str, Any]:
@@ -59,7 +55,13 @@ def read_opt_yaml(folder_path: str) -> Dict[str, Any]:
     )
 
 
-def download_from_wandb(wandb_run, wandb_path, local_path, force=False) -> str:
+def download_from_wandb(
+    wandb_run: wandb.apis.public.Run,
+    wandb_path: str,
+    local_path: str,
+    force: bool = False,
+) -> str:
+    """Download file from wandb."""
     download_path = os.path.join(local_path, *wandb_path.split("/"))
 
     if force or not os.path.isfile(download_path):
@@ -68,7 +70,8 @@ def download_from_wandb(wandb_run, wandb_path, local_path, force=False) -> str:
     return download_path
 
 
-def export_exp_from_wandb(wandb_path: str, save_path: str):
+def export_exp_from_wandb(wandb_path: str, save_path: str) -> None:
+    """Export experience from wandb."""
     api = wandb.Api()
     run = api.run(wandb_path)
     for file in run.files():
@@ -84,7 +87,7 @@ def load_model_from_wandb(
     load_weights: bool = True,
     single_cls: bool = True,
     verbose: int = 1,
-):
+) -> Tuple[Model, wandb.apis.public.Run]:
     """Load model from wandb run path.
 
     Args:
@@ -107,7 +110,7 @@ def load_model_from_wandb(
     if isinstance(device, str):
         device = select_device(device)
 
-    if not "env" in run.config:
+    if "env" not in run.config:
         run.config["env"] = dict()
 
         opt_path = download_from_wandb(
@@ -165,6 +168,7 @@ def load_model_from_wandb(
 
 def dot2bracket(s: str) -> str:
     """Replace layer names with valid names for pruning.
+
     Test:
        >>> dot2bracket("dense2.1.bn1.bias")
        'dense2[1].bn1.bias'
