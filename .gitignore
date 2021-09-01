@@ -246,3 +246,6 @@ fabric.properties
 
 # wandb log directory.
 wandb
+
+# export path
+export
