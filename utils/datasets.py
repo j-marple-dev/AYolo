@@ -12,8 +12,8 @@ import time
 from functools import partial
 from pathlib import Path
 from threading import Thread
-from typing import (TYPE_CHECKING, Any, Iterable, Iterator, List, Optional,
-                    Tuple, Union)
+from typing import (TYPE_CHECKING, Any, Dict, Iterable, Iterator, List,
+                    Optional, Tuple, Union)
 
 if TYPE_CHECKING:
     from tensorrt_run.dataset.dataset import DatasetBase
@@ -594,7 +594,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
     def cache_labels(self, path: str = "labels.cache") -> dict:
         """Cache dataset labels, check images and read shapes."""
-        x = {}  # dict
+        x: Dict[str, Optional[Union[Tuple[int, int], list, np.ndarray]]] = {}  # dict
         pbar = tqdm(
             zip(self.img_files, self.label_files),
             desc="Scanning images",

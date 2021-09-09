@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+import wandb
 import yaml
 from tqdm import tqdm
 
-import wandb
 from models.experimental import attempt_load
 from models.yolo import Model
 from utils.datasets import create_dataloader

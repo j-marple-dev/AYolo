@@ -8,9 +8,9 @@ import os
 from typing import Tuple, Union
 
 import torch
+import wandb
 import yaml
 
-import wandb
 from utils.torch_utils import select_device
 
 
