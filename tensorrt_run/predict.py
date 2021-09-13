@@ -19,9 +19,6 @@ from tqdm import tqdm
 
 from tensorrt_run.dataset.dataset import create_torch_dataloader
 from tensorrt_run.dataset.dataset_dali import create_dali_dataloader
-from tensorrt_run.trt_utils.result_writer import (ResultWriterBase,
-                                                  ResultWriterDali,
-                                                  ResultWriterTorch)
 from tensorrt_run.trt_utils.tensorrt_utils import (TrtWrapper,
                                                    convert_to_torchout)
 from utils.general import non_max_suppression
@@ -83,7 +80,7 @@ def get_params(model_path: str) -> int:
 
 
 @torch.no_grad()
-def run_torchdl(config: dict) -> ResultWriterBase:
+def run_torchdl(config: dict) -> List[List[torch.Tensor]]:
     """Run torch dataloader."""
     device = select_device(config["device"])
     model = load_model(
@@ -95,12 +92,9 @@ def run_torchdl(config: dict) -> ResultWriterBase:
         device,
     )
     dataloader, dataset = create_torch_dataloader(config)
-    result_writer = ResultWriterTorch(
-        original_shape=config["Dataset"]["original_shape"]
-    )
-    result_writer.start()
+    outputs = []
 
-    for _batch_idx, (imgs, paths, shapes, _targets) in enumerate(tqdm(dataloader)):
+    for _batch_idx, (imgs, _, _, _targets) in enumerate(tqdm(dataloader)):
         imgs = imgs.to(device, non_blocking=True)
         imgs = torch.div(imgs, 255.0)
 
@@ -117,12 +111,13 @@ def run_torchdl(config: dict) -> ResultWriterBase:
             # TODO Extensive Test Required.
             output = model(imgs)
             output = convert_to_torchout(output)
-        result_writer.add_outputs(paths, output, imgs.shape[-2:], shapes=shapes)
 
-    return result_writer
+        outputs.append(output)
+
+    return outputs
 
 
-def run_dali(config: dict) -> ResultWriterDali:
+def run_dali(config: dict) -> List[List[torch.Tensor]]:
     """Run dali dataloader."""
     device = select_device(config["device"])
     t0 = datetime.datetime.now()
@@ -136,9 +131,9 @@ def run_dali(config: dict) -> ResultWriterDali:
     )
     print(f"Model Load: {datetime.datetime.now()-t0}")
     pipeline, dataset = create_dali_dataloader(config)
-    result_writer = ResultWriterDali(pipeline, config["Dataset"]["original_shape"])
-    result_writer.start()
     print(f"Model+Data Loader: {datetime.datetime.now()-t0}")
+
+    outputs = []
 
     if config["model"] == "torch":
         # Torch Tensor
@@ -148,7 +143,7 @@ def run_dali(config: dict) -> ResultWriterDali:
             )
             for _, data in tqdm(enumerate(loader)):
                 imgs = data[0]["img"]
-                ids = data[0]["img_id"].cpu().numpy().flatten()
+                # ids = data[0]["img_id"].cpu().numpy().flatten()
                 if config["dtype"] != "fp32":
                     imgs = imgs.half()
                 inf_out = model(imgs)[0]
@@ -158,10 +153,7 @@ def run_dali(config: dict) -> ResultWriterDali:
                     conf_thres=config["conf_thres"],
                     iou_thres=config["iou_thres"],
                 )
-
-                result_writer.add_outputs(
-                    dataset.img_names[ids], output, imgs.shape[-2:]
-                )
+                outputs.append(output)
     else:
         # DALI Tensor
         pipeline.schedule_run()
@@ -170,16 +162,14 @@ def run_dali(config: dict) -> ResultWriterDali:
             if dataset.n_iter == 0:
                 pipeline.schedule_run()
             imgs = pipe_out[0]
-            ids = pipe_out[1].as_cpu().as_array().flatten()
+            # ids = pipe_out[1].as_cpu().as_array().flatten()
             output = model(imgs)
             output = convert_to_torchout(output)
 
             pipeline.release_outputs()
-            result_writer.add_outputs(
-                dataset.img_names[ids], output, imgs[0].shape()[-2:]
-            )
+            outputs.append(output)
 
-    return result_writer
+    return outputs
 
 
 if __name__ == "__main__":
@@ -218,13 +208,9 @@ if __name__ == "__main__":
     config["path"] = os.path.join(os.getcwd(), config["path"])
 
     if config["dataloader"] == "torch":
-        result_writer = run_torchdl(config)
+        outputs = run_torchdl(config)
     else:
-        result_writer = run_dali(config)
+        outputs = run_dali(config)
     runtime = (datetime.datetime.now() - start).seconds
 
-    # Save results
-    result_writer.add_queue(
-        (get_params(config["path"]), runtime)
-    )  # Record param number and runtime
-    result_writer.close()
+    print(f"Runtime: {runtime}")
