@@ -12,9 +12,9 @@ from typing import Any, List, Tuple, Union
 import numpy as np
 import optuna
 import torch
+import wandb
 import yaml
 
-import wandb
 from model_searcher.abstract_optimizer import AbstractOptimizer
 from model_searcher.auto_model_generator.model_generator import \
     AutoModelGenerator

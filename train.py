@@ -17,13 +17,13 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
+import wandb
 import yaml
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import wandb
 from models.yolo import Model
 from utils.datasets import create_dataloader
 from utils.general import (check_anchors, check_dataset, check_file,

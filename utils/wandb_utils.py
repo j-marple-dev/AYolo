@@ -10,9 +10,9 @@ from typing import Any, Dict, Tuple, Union
 
 import torch
 import torch.nn as nn
+import wandb
 import yaml
 
-import wandb
 from models.yolo import Model
 from utils.torch_utils import select_device
 

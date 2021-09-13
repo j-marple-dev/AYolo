@@ -244,10 +244,9 @@ class TrtWrapper(object):
             self.bindings.append(int(device_mem))
 
     def _create_output_buffers(self) -> None:
-        self.outputs_ptr: List[Optional[int]] = [None] * len(self.output_names)
-        self.outputs_tensor: List[Optional[torch.Tensor]] = [None] * len(
-            self.output_names
-        )
+        self.outputs_tensor = [torch.empty(1) for _ in range(len(self.output_names))]
+        self.outputs_ptr = [t.data_ptr() for t in self.outputs_tensor]
+
         for i, name in enumerate(self.output_names):
             idx = self.engine.get_binding_index(name)
             shape = self.engine.get_binding_shape(idx)
@@ -334,8 +333,8 @@ class TrtWrapper(object):
             torch.cat(
                 (
                     self.outputs_tensor[1],
-                    self.outputs_tensor[2].unsqueeze(-1),  # type: ignore
-                    self.outputs_tensor[3].unsqueeze(-1),  # type: ignore
+                    self.outputs_tensor[2].unsqueeze(-1),
+                    self.outputs_tensor[3].unsqueeze(-1),
                 ),
                 -1,
             ),

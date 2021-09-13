@@ -20,7 +20,7 @@ from typing import (TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple,
                     Union)
 
 if TYPE_CHECKING:
-    from models.yolo import Model
+    from models.yolo import Model, Detect
     from utils.datasets import LoadImagesAndLabels
 
 import cv2
@@ -29,13 +29,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+import wandb
 import yaml
 from PIL import Image
 from scipy.cluster.vq import kmeans
 from scipy.signal import butter, filtfilt
 from tqdm import tqdm
 
-import wandb
 from utils.google_utils import gsutil_getsize
 from utils.torch_utils import init_torch_seeds
 
@@ -127,7 +127,15 @@ def check_anchors(
 ) -> None:
     """Check anchor fit to data, recompute if necessary."""
     print("\nAnalyzing anchors... ", end="")
-    m: nn.Module = model.model[-1]  # Detect()
+
+    if isinstance(model, torch.nn.DataParallel):
+        assert isinstance(
+            model.module.model, nn.Sequential
+        ), "Model must be a sequential"
+        m: "Detect" = model.module.model[-1]
+    else:
+        m = model.model[-1]
+
     shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     scale = np.random.uniform(0.9, 1.1, size=(shapes.shape[0], 1))  # augment scale
     wh = torch.tensor(
@@ -894,10 +902,15 @@ def build_targets(
 ) -> Tuple[list, list, list, list]:
     """Build targets for compute_loss()."""
     # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
-    det = (
-        # model.module.model[-1] if is_parallel(model) else model.model[-1]
-        model.model[-1]
-    )  # Detect() module
+
+    if isinstance(model, torch.nn.DataParallel):
+        assert isinstance(
+            model.module.model, nn.Sequential
+        ), "Model must be a sequential"
+        det: "Detect" = model.module.model[-1]
+    else:
+        det = model.model[-1]
+
     na, nt = det.na, targets.shape[0]  # number of anchors, targets
     tcls, tbox, indices, anch = [], [], [], []
     gain = torch.ones(7, device=targets.device)  # normalized to gridspace gain
@@ -925,7 +938,7 @@ def build_targets(
     )  # offsets
 
     for i in range(det.nl):
-        anchors = det.anchors[i]
+        anchors = det.anchors[i]  # type: ignore
         gain[2:6] = torch.tensor(p[i].shape)[[3, 2, 3, 2]]  # xyxy gain
 
         # Match targets to anchors
