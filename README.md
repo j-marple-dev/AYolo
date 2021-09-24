@@ -21,14 +21,14 @@ $ cd AYolo
 ## Installation
 ### 1. Create virtual environment and install requirements
 ```bash
-$ conda create -n yolov5 python=3.7
-$ conda activate yolov5
+$ conda create -n AYolo python=3.7
+$ conda activate AYolo
 $ pip install -r requirements.txt
 ```
 
 ### 2. (Optional for nvidia gpu) Install cudatoolkit.
 ```bash
-$ conda activate yolov5
+$ conda activate AYolo
 $ conda install -c pytorch cudatoolkit=${cuda_version}
 ```
 
