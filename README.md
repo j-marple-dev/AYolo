@@ -14,8 +14,8 @@ This repository is based on [Ultralytics YOLOv5](https://github.com/ultralytics/
 * Docker (Optional)
 * Clone this repository
 ```bash
-$ git clone https://github.com/j-marple-dev/yolov5.git
-$ cd yolov5
+$ https://github.com/j-marple-dev/AYolo.git
+$ cd AYolo
 ```
 
 ## Installation
