@@ -2,7 +2,7 @@
 This repository is based on [Ultralytics YOLOv5](https://github.com/ultralytics/yolov5).
 
 ## TODO
-- [*] Training w/ w/o wandb
+- [ ] Training w/ w/o wandb
 - [ ] Test with local torch weights
 - [ ] AutoML with optuna optimizer
 
